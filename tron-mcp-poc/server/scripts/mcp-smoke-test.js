@@ -30,6 +30,17 @@ async function run() {
     const toolsResult = await client.listTools();
     const toolNames = (toolsResult?.tools || []).map((t) => t.name);
     console.log("Tools:", toolNames.join(", ") || "(none)");
+    const expectedTools = [
+      "get_network_status",
+      "get_usdt_balance",
+      "get_tx_status",
+      "get_account_profile",
+      "verify_unsigned_tx",
+    ];
+    const missing = expectedTools.filter((name) => !toolNames.includes(name));
+    if (missing.length) {
+      throw new Error(`Missing tools: ${missing.join(", ")}`);
+    }
 
     const network = await client.callTool({
       name: "get_network_status",
@@ -53,6 +64,46 @@ async function run() {
     });
     console.log("get_tx_status:");
     console.log(JSON.stringify(tx, null, 2));
+
+    const profile = await client.callTool({
+      name: "get_account_profile",
+      arguments: { address: "TDsUeaXFJHx7AabwWwkWvtQiSL7vfkxYav" },
+    });
+    console.log("get_account_profile:");
+    console.log(JSON.stringify(profile, null, 2));
+
+    const verifyUnsigned = await client.callTool({
+      name: "verify_unsigned_tx",
+      arguments: {
+        unsignedTx: {
+          raw_data: {
+            expiration: 4102444800000,
+            contract: [
+              {
+                type: "TransferContract",
+                parameter: {
+                  value: {
+                    owner_address: "TB3Ttmeh5bgesBmMSqRSjpSmBsufKNgjAN",
+                    to_address: "TDsUeaXFJHx7AabwWwkWvtQiSL7vfkxYav",
+                    amount: 1,
+                  },
+                },
+              },
+            ],
+          },
+          raw_data_hex: "0a02cafe",
+        },
+      },
+    });
+    console.log("verify_unsigned_tx:");
+    console.log(JSON.stringify(verifyUnsigned, null, 2));
+
+    const invalidTx = await client.callTool({
+      name: "get_tx_status",
+      arguments: { txid: "abc" },
+    });
+    console.log("get_tx_status (invalid txid):");
+    console.log(JSON.stringify(invalidTx, null, 2));
   } finally {
     await client.close().catch(() => {});
   }

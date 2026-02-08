@@ -30,3 +30,40 @@ Content-Type: application/json
   "tool": "get_tx_status",
   "args": { "txid": "a3b7f0b8c1f5e9d3a3b7f0b8c1f5e9d3a3b7f0b8c1f5e9d3a3b7f0b8c1f5e9d3" }
 }
+
+### Call: get_account_profile
+POST http://localhost:8787/call
+Content-Type: application/json
+
+{
+  "tool": "get_account_profile",
+  "args": { "address": "TB3Ttmeh5bgesBmMSqRSjpSmBsufKNgjAN" }
+}
+
+### Call: verify_unsigned_tx
+POST http://localhost:8787/call
+Content-Type: application/json
+
+{
+  "tool": "verify_unsigned_tx",
+  "args": {
+    "unsignedTx": {
+      "raw_data": {
+        "expiration": 4102444800000,
+        "contract": [
+          {
+            "type": "TransferContract",
+            "parameter": {
+              "value": {
+                "owner_address": "TB3Ttmeh5bgesBmMSqRSjpSmBsufKNgjAN",
+                "to_address": "TDsUeaXFJHx7AabwWwkWvtQiSL7vfkxYav",
+                "amount": 1
+              }
+            }
+          }
+        ]
+      },
+      "raw_data_hex": "0a02cafe"
+    }
+  }
+}

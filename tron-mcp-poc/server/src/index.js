@@ -2,7 +2,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import { getTransactionInfo } from "./providers/tronscan.js";
-import { getAccount, getAccountTransactions, getChainParameters, getNowBlock, getTrc20Balance } from "./providers/trongrid.js";
+import { getAccount, getAccountTransactions, getChainParameters, getNowBlock, getTrc20Balance, toHexAddress } from "./providers/trongrid.js";
 import { startMcpServer } from "./mcp.js";
 
 const DEFAULT_HTTP_PORT = 8787;
@@ -70,6 +70,19 @@ const TOOLS = [
       required: ["address"],
       additionalProperties: false
     }
+  },
+  {
+    name: "verify_unsigned_tx",
+    description: "Verify an unsigned TRON transaction payload and derive txid from raw_data_hex.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        unsignedTx: { type: "object" },
+        rawDataHex: { type: "string" }
+      },
+      anyOf: [{ required: ["unsignedTx"] }, { required: ["rawDataHex"] }],
+      additionalProperties: false
+    }
   }
 ];
 
@@ -109,6 +122,48 @@ function isValidAddress(address) {
 
 function isValidTxid(txid) {
   return typeof txid === "string" && /^[0-9a-fA-F]{64}$/.test(txid);
+}
+
+function normalizeHex(input) {
+  if (typeof input !== "string") return null;
+  const raw = input.startsWith("0x") ? input.slice(2) : input;
+  if (!raw || raw.length % 2 !== 0) return null;
+  if (!/^[0-9a-fA-F]+$/.test(raw)) return null;
+  return raw.toLowerCase();
+}
+
+function normalizeAddressLike(addressLike) {
+  if (typeof addressLike !== "string") return null;
+  const value = addressLike.trim();
+  if (!value) return null;
+
+  if (value.startsWith("T")) {
+    try {
+      return {
+        base58: value,
+        hex: toHexAddress(value).toLowerCase()
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const hex = value.startsWith("0x") ? value.slice(2) : value;
+  if (/^[0-9a-fA-F]{42}$/.test(hex)) {
+    return {
+      base58: null,
+      hex: hex.toLowerCase()
+    };
+  }
+
+  return null;
+}
+
+function deriveTxidFromRawDataHex(rawDataHex) {
+  const normalized = normalizeHex(rawDataHex);
+  if (!normalized) return null;
+  const bytes = Buffer.from(normalized, "hex");
+  return crypto.createHash("sha256").update(bytes).digest("hex");
 }
 
 function formatTokenAmount(raw, decimals) {
@@ -192,26 +247,8 @@ function parseAddressMeta(address) {
     if (typeof address !== "string") {
       return { base58Valid: false, addressHex: null, network: "unknown", riskHint: "地址格式异常" };
     }
-    const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-    let num = 0n;
-    let leading = 0;
-    for (let i = 0; i < address.length && address[i] === "1"; i += 1) {
-      leading += 1;
-    }
-    for (const ch of address) {
-      const idx = alphabet.indexOf(ch);
-      if (idx < 0) throw new Error("Invalid base58 character");
-      num = num * 58n + BigInt(idx);
-    }
 
-    let hex = num.toString(16);
-    if (hex.length % 2 === 1) hex = `0${hex}`;
-    const bytes = Buffer.from(hex, "hex");
-    const payload = Buffer.concat([Buffer.alloc(leading, 0), bytes]);
-
-    if (payload.length < 4) throw new Error("Invalid base58 length");
-    const addrPayload = payload.slice(0, -4);
-    const addressHex = addrPayload.toString("hex");
+    const addressHex = toHexAddress(address).toLowerCase();
 
     let network = "unknown";
     if (addressHex.startsWith("41")) network = "TRON";
@@ -220,7 +257,7 @@ function parseAddressMeta(address) {
       base58Valid: true,
       addressHex,
       network,
-      riskHint: "未发现明显风险"
+      riskHint: network === "TRON" ? "未发现明显风险" : "地址网络前缀异常"
     };
   } catch (err) {
     return { base58Valid: false, addressHex: null, network: "unknown", riskHint: "地址 Base58 校验失败" };
@@ -228,11 +265,14 @@ function parseAddressMeta(address) {
 }
 
 function summarizeTxs(list, address) {
-  const base58 = address;
+  const target = normalizeAddressLike(address);
+  const targetBase58 = target?.base58 ?? null;
+  const targetHex = target?.hex ?? null;
   let inbound = 0;
   let outbound = 0;
   let total = 0;
   let lastTimestamp = null;
+
   for (const tx of list) {
     total += 1;
     const owner = tx?.raw_data?.contract?.[0]?.parameter?.value?.owner_address;
@@ -240,8 +280,15 @@ function summarizeTxs(list, address) {
     const ts = tx?.block_timestamp || tx?.raw_data?.timestamp || null;
     if (!lastTimestamp && ts) lastTimestamp = ts;
 
-    if (owner === base58) outbound += 1;
-    if (to === base58) inbound += 1;
+    const ownerNormalized = normalizeAddressLike(owner);
+    const toNormalized = normalizeAddressLike(to);
+    const ownerMatch = ownerNormalized
+      && ((targetBase58 && ownerNormalized.base58 === targetBase58) || (targetHex && ownerNormalized.hex === targetHex));
+    const toMatch = toNormalized
+      && ((targetBase58 && toNormalized.base58 === targetBase58) || (targetHex && toNormalized.hex === targetHex));
+
+    if (ownerMatch) outbound += 1;
+    if (toMatch) inbound += 1;
   }
 
   return { total, inbound, outbound, lastTimestamp };
@@ -295,20 +342,6 @@ async function handleToolCall(tool, args) {
     const { address } = args ?? {};
     if (!isValidAddress(address)) {
       return { status: 400, body: jsonError(tool, "INVALID_ADDRESS", "address must start with T and length 30-40") };
-    }
-
-    if (!process.env.TRONGRID_API_KEY) {
-      return {
-        status: 401,
-        body: jsonError(
-          tool,
-          "MISSING_API_KEY",
-          "TRONGRID_API_KEY is required",
-          {},
-          "trongrid",
-          "请在 server/.env 配置 TRONGRID_API_KEY"
-        )
-      };
     }
 
     try {
@@ -379,24 +412,95 @@ async function handleToolCall(tool, args) {
     }
   }
 
+  if (tool === "verify_unsigned_tx") {
+    const unsignedTx = args?.unsignedTx;
+    const argRawDataHex = args?.rawDataHex;
+    if (unsignedTx !== undefined && (typeof unsignedTx !== "object" || unsignedTx === null || Array.isArray(unsignedTx))) {
+      return { status: 400, body: jsonError(tool, "INVALID_UNSIGNED_TX", "unsignedTx must be an object") };
+    }
+    if (argRawDataHex !== undefined && typeof argRawDataHex !== "string") {
+      return { status: 400, body: jsonError(tool, "INVALID_RAW_DATA_HEX", "rawDataHex must be a string") };
+    }
+
+    const rawDataHexInput = argRawDataHex ?? unsignedTx?.raw_data_hex;
+    if (typeof rawDataHexInput !== "string") {
+      return {
+        status: 400,
+        body: jsonError(tool, "MISSING_RAW_DATA_HEX", "Provide rawDataHex or unsignedTx.raw_data_hex")
+      };
+    }
+
+    const rawDataHex = normalizeHex(rawDataHexInput);
+    if (!rawDataHex) {
+      return {
+        status: 400,
+        body: jsonError(tool, "INVALID_RAW_DATA_HEX", "rawDataHex must be even-length hex string")
+      };
+    }
+
+    const txid = deriveTxidFromRawDataHex(rawDataHex);
+    const signatures = Array.isArray(unsignedTx?.signature) ? unsignedTx.signature : [];
+    const hasSignature = signatures.length > 0;
+    const contract = unsignedTx?.raw_data?.contract?.[0];
+    const contractType = contract?.type ?? null;
+    const value = contract?.parameter?.value ?? {};
+    const ownerAddress = value.owner_address ?? null;
+    const toAddress = value.to_address ?? null;
+    const ownerNorm = ownerAddress ? normalizeAddressLike(ownerAddress) : null;
+    const toNorm = toAddress ? normalizeAddressLike(toAddress) : null;
+    const amountSun = value.amount ?? null;
+    const expiration = Number.isFinite(unsignedTx?.raw_data?.expiration) ? unsignedTx.raw_data.expiration : null;
+    const now = Date.now();
+    const expired = expiration !== null ? expiration <= now : null;
+
+    const warnings = [];
+    if (hasSignature) warnings.push("交易对象包含 signature 字段，不是未签名交易");
+    if (ownerAddress && !ownerNorm) warnings.push("owner_address 格式无效");
+    if (toAddress && !toNorm) warnings.push("to_address 格式无效");
+    if (amountSun !== null && Number(amountSun) < 0) warnings.push("amount 不能小于 0");
+    if (expired === true) warnings.push("交易已过期");
+
+    const valid =
+      !hasSignature
+      && (ownerAddress ? Boolean(ownerNorm) : true)
+      && (toAddress ? Boolean(toNorm) : true)
+      && (expired !== true)
+      && Boolean(txid);
+
+    const summary = valid
+      ? "未签名交易校验通过，可用于后续签名流程"
+      : `未签名交易存在 ${warnings.length || 1} 项风险，请修正后再签名`;
+
+    return {
+      status: 200,
+      body: jsonOk(
+        tool,
+        {
+          valid,
+          txid,
+          isUnsigned: !hasSignature,
+          hasSignature,
+          contractType,
+          ownerAddress,
+          ownerAddressValid: ownerAddress ? Boolean(ownerNorm) : null,
+          toAddress,
+          toAddressValid: toAddress ? Boolean(toNorm) : null,
+          amountSun: amountSun !== null ? String(amountSun) : null,
+          amountTrx: amountSun !== null ? formatTokenAmount(String(amountSun), 6) : null,
+          expiration,
+          expired,
+          warnings
+        },
+        summary,
+        "local-validation"
+      )
+    };
+  }
+
   if (tool === "get_account_profile") {
     const { address } = args ?? {};
     if (!isValidAddress(address)) {
       return { status: 400, body: jsonError(tool, "INVALID_ADDRESS", "address must start with T and length 30-40") };
-    }
-
-    if (!process.env.TRONGRID_API_KEY) {
-      return {
-        status: 401,
-        body: jsonError(
-          tool,
-          "MISSING_API_KEY",
-          "TRONGRID_API_KEY is required",
-          {},
-          "trongrid",
-          "请在 server/.env 配置 TRONGRID_API_KEY"
-        )
-      };
     }
 
     try {

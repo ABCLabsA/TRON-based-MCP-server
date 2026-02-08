@@ -13,7 +13,7 @@ function sha256(buf) {
   return crypto.createHash("sha256").update(buf).digest();
 }
 
-function base58CheckDecode(input) {
+export function base58CheckDecode(input) {
   let num = 0n;
   let leading = 0;
   for (let i = 0; i < input.length && input[i] === "1"; i += 1) {
@@ -40,7 +40,7 @@ function base58CheckDecode(input) {
   return payload;
 }
 
-function toHexAddress(addressBase58) {
+export function toHexAddress(addressBase58) {
   const payload = base58CheckDecode(addressBase58);
   return payload.toString("hex");
 }

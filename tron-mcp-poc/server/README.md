@@ -42,21 +42,23 @@ npm run mcp:test
 
 Expected output (example):
 ```
-Tools: get_network_status, get_usdt_balance, get_tx_status, get_account_profile
+Tools: get_network_status, get_usdt_balance, get_tx_status, get_account_profile, verify_unsigned_tx
 get_network_status:
 { ... ok: true ... }
 get_usdt_balance:
-{ ... ok: true or ok: false if missing TRONGRID_API_KEY ... }
+{ ... ok: true ... }
 get_tx_status:
 { ... ok: true or ok: false for invalid txid ... }
 get_account_profile:
 { ... ok: true, includes activity summary ... }
+verify_unsigned_tx:
+{ ... ok: true, includes valid/txid/warnings ... }
 ```
 
 ### Claude Desktop setup
 1) Use `server/mcp.json` as a template.
 2) Update the script path to your local `tron-mcp-poc\server\src\index.js`.
-3) Add your `TRONGRID_API_KEY` in the `env` block.
+3) Optionally add `TRONGRID_API_KEY` in the `env` block for higher quota.
 4) Paste the `mcpServers` block into Claude Desktop config.
 
 Config location (Windows):
@@ -69,9 +71,10 @@ Restart Claude Desktop. The tools should appear as:
 - `get_usdt_balance`
 - `get_tx_status`
 - `get_account_profile`
+- `verify_unsigned_tx`
 
-## API Keys (required for get_usdt_balance / get_account_profile)
-- `TRONGRID_API_KEY`: required to call TRON Grid APIs for TRC20 balance and activity.
+## API Keys (optional on Nile testnet)
+- `TRONGRID_API_KEY`: optional on Nile, recommended for better quota stability.
 
 Set it in `server/.env` (see `server/.env.example`).
 
@@ -99,6 +102,11 @@ curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d "
 ### Call tool: get_account_profile
 ```
 curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d "{\"tool\":\"get_account_profile\",\"args\":{\"address\":\"TQ9d1eZkS4s2a9x1YQ9d1eZkS4s2a9x1YQ\"}}"
+```
+
+### Call tool: verify_unsigned_tx
+```
+curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d "{\"tool\":\"verify_unsigned_tx\",\"args\":{\"rawDataHex\":\"0a02cafe\"}}"
 ```
 
 ## HTTP client file

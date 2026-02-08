@@ -19,6 +19,7 @@
   - 点击 **USDT Balance**，看到 USDT 与 TRX 余额，并处理 decimals。
   - 同时展示地址安全快照：Base58 校验结果、地址 Hex、风险提示。
   - 点击 **Tx Status**，返回交易状态与确认时间。
+  - 最后演示 **Unsigned Tx Verify**：输入 `raw_data_hex` 或未签名交易对象，返回 `valid`、`txid` 与风险提示。
 
 ## 1:20 - 2:10  MCP 能力演示（Claude Desktop）
 - 画面：Claude Desktop 调用工具

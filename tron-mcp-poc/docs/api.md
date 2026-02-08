@@ -52,14 +52,44 @@ curl http://localhost:8787/tools
 - `addressMeta`：Base58 校验/地址 Hex/风险提示
 - `activity`：最近交易统计
 
+### verify_unsigned_tx
+```
+{
+  "tool": "verify_unsigned_tx",
+  "args": {
+    "rawDataHex": "0a02cafe"
+  }
+}
+```
+或：
+```
+{
+  "tool": "verify_unsigned_tx",
+  "args": {
+    "unsignedTx": {
+      "raw_data_hex": "0a02cafe"
+    }
+  }
+}
+```
+
+返回包含：
+- `valid`：校验是否通过
+- `txid`：由 `raw_data_hex` 派生的交易 ID
+- `isUnsigned` / `hasSignature`
+- `warnings`：风险提示数组
+
 ## 校验规则
-- address：以 `T` 开头，长度 30~40
+- address：以 `T` 开头，长度 30~40，且 Base58Check 校验通过
 - txid：64 位 hex
+- rawDataHex：偶数长度 hex 字符串
 
 ## 错误码
 - `INVALID_REQUEST`
 - `TOOL_NOT_FOUND`
 - `INVALID_ADDRESS`
 - `INVALID_TXID`
-- `MISSING_API_KEY`
+- `INVALID_UNSIGNED_TX`
+- `INVALID_RAW_DATA_HEX`
+- `MISSING_RAW_DATA_HEX`
 - `UPSTREAM_ERROR`
