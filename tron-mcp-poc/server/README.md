@@ -55,6 +55,13 @@ verify_unsigned_tx:
 { ... ok: true, includes valid/txid/warnings ... }
 ```
 
+## MCP HTTP Smoke Test
+Run the HTTP MCP smoke test (assumes server is running on port 8787):
+```
+cd tron-mcp-poc\server
+npm run mcp:http-test
+```
+
 ### Claude Desktop setup
 1) Use `server/mcp.json` as a template.
 2) Update the script path to your local `tron-mcp-poc\server\src\index.js`.

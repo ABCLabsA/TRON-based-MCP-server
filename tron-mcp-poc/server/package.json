@@ -10,7 +10,9 @@
     "dev": "node src/index.js",
     "start": "node src/index.js",
     "mcp:stdio": "node src/index.js --stdio",
-    "mcp:test": "node scripts/mcp-smoke-test.js"
+    "mcp:test": "node scripts/mcp-smoke-test.js",
+    "mcp:http-test": "node scripts/mcp-http-smoke-test.js",
+    "test": "node --test tests"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

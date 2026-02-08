@@ -31,6 +31,13 @@ npm run build
 npm run preview
 ```
 
+## Docker（后端）
+```
+cd tron-mcp-poc\server
+docker build -t tron-mcp-server .
+docker run -p 8787:8787 --env-file .env tron-mcp-server
+```
+
 ## 健康检查
 ```
 curl http://localhost:8787/health

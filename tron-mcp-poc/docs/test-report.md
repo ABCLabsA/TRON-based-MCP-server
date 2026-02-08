@@ -21,3 +21,25 @@ npm run mcp:test
 - 校验 5 个工具全部注册
 - 依次调用 5 个工具
 - 覆盖 1 个错误路径（非法 txid）
+
+## MCP HTTP 冒烟测试
+```
+cd tron-mcp-poc\server
+npm run mcp:http-test
+```
+
+预期：
+- `initialize` 返回协议版本与 serverInfo
+- `tools/list` 返回 5 个工具
+- `tools/call` 返回标准 MCP 格式（content/isError）
+
+## 单元/契约测试
+```
+cd tron-mcp-poc\server
+npm run test
+```
+
+覆盖：
+- Base58Check 转换与非法校验
+- HTTP 429 退避重试
+- 非 JSON 响应错误处理

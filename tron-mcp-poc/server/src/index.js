@@ -20,6 +20,34 @@ function sendJson(res, status, body) {
   res.end(data);
 }
 
+function toMcpToolResult(body) {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(body, null, 2)
+      }
+    ],
+    isError: body?.ok === false
+  };
+}
+
+function sendJsonRpcResult(res, id, result) {
+  return sendJson(res, 200, {
+    jsonrpc: "2.0",
+    id: id ?? null,
+    result
+  });
+}
+
+function sendJsonRpcError(res, id, code, message, data = null) {
+  return sendJson(res, 200, {
+    jsonrpc: "2.0",
+    id: id ?? null,
+    error: { code, message, data }
+  });
+}
+
 function parseBody(req) {
   return new Promise((resolve, reject) => {
     let raw = "";
@@ -589,52 +617,70 @@ function startHttpServer() {
       }
     }
 
-    // Minimal MCP JSON-RPC over HTTP bridge
+    // MCP JSON-RPC over HTTP bridge
     if (req.method === "POST" && url.pathname === "/mcp") {
+      let msg;
       try {
         const raw = await parseBody(req);
-        const msg = raw ? JSON.parse(raw) : {};
+        msg = raw ? JSON.parse(raw) : {};
+      } catch {
+        return sendJsonRpcError(res, null, -32700, "Parse error");
+      }
+
+      try {
+        if (!msg || typeof msg !== "object") {
+          return sendJsonRpcError(res, null, -32600, "Invalid Request");
+        }
+
+        if (msg.method === "ping") {
+          return sendJsonRpcResult(res, msg.id, {});
+        }
 
         if (msg.method === "initialize") {
-          return sendJson(res, 200, {
-            jsonrpc: "2.0",
-            id: msg.id ?? null,
-            result: {
-              protocolVersion: "2024-11-05",
-              serverInfo: SERVER_INFO,
-              capabilities: {
-                tools: { listChanged: false }
-              }
+          return sendJsonRpcResult(res, msg.id, {
+            protocolVersion: "2024-11-05",
+            serverInfo: SERVER_INFO,
+            capabilities: {
+              tools: { listChanged: false }
             }
           });
         }
 
+        if (msg.method === "notifications/initialized") {
+          if (msg.id === undefined) {
+            res.writeHead(204);
+            res.end();
+            return;
+          }
+          return sendJsonRpcResult(res, msg.id, {});
+        }
+
         if (msg.method === "tools/list") {
-          return sendJson(res, 200, {
-            jsonrpc: "2.0",
-            id: msg.id ?? null,
-            result: { tools: TOOLS }
-          });
+          return sendJsonRpcResult(res, msg.id, { tools: TOOLS });
         }
 
         if (msg.method === "tools/call") {
           const name = msg?.params?.name;
           const args = msg?.params?.arguments ?? {};
+          if (typeof name !== "string" || !name) {
+            return sendJsonRpcError(res, msg.id, -32602, "Invalid params", { reason: "name is required" });
+          }
           const result = await handleToolCall(name, args);
-          return sendJson(res, 200, {
-            jsonrpc: "2.0",
-            id: msg.id ?? null,
-            result
-          });
+          return sendJsonRpcResult(res, msg.id, toMcpToolResult(result.body));
         }
 
-        return sendJson(res, 200, {
-          jsonrpc: "2.0",
-          id: msg.id ?? null,
-          result: { ok: true }
-        });
+        if (msg.method && msg.method.startsWith("notifications/")) {
+          if (msg.id === undefined) {
+            res.writeHead(204);
+            res.end();
+            return;
+          }
+          return sendJsonRpcResult(res, msg.id, {});
+        }
+
+        return sendJsonRpcError(res, msg.id, -32601, "Method not found", { method: msg.method ?? null });
       } catch (err) {
-        return sendJson(res, 400, { error: "Bad Request" });
+        return sendJsonRpcError(res, msg?.id, -32603, "Internal error", { message: err?.message || "Unknown" });
       }
     }
 
