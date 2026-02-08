@@ -1,8 +1,24 @@
 ﻿# tron-mcp-poc
 
-TRON 链上数据的 MCP 工具化示例，提供 HTTP Bridge + MCP stdio + Web Demo。
+TRON Nile 测试网的 MCP 工具化示例，提供 HTTP Bridge + MCP stdio + Web Demo。
 
-## 一键启动（本地）
+## 项目简介
+- 将 TRON 链上常用查询封装为 MCP 工具
+- 同时提供 HTTP Bridge，方便 Web/脚本调用
+- 面向比赛评审的可运行 Demo
+
+## 核心功能
+- `get_network_status`：查询最新区块高度与时间戳
+- `get_usdt_balance`：查询 TRC20 USDT 余额（含 TRX 余额）
+- `get_tx_status`：查询交易状态与确认时间
+- 地址安全快照：Base58 校验、地址 Hex、风险提示
+
+## 技术栈
+- Node.js 18+（HTTP Bridge + MCP stdio）
+- React + Vite（Demo 控制台）
+- 上游 API：TronGrid / TronScan（Nile 测试网）
+
+## 快速开始（5分钟）
 
 ### 1) 安装依赖
 ```
@@ -12,74 +28,85 @@ cd ..\web
 npm install
 ```
 
-### 2) 配置 API Key（必须）
+### 2) 配置环境（Nile 测试网）
 在 `tron-mcp-poc\server\.env` 中配置：
 ```
 NODE_ENV=development
-TRONGRID_API_KEY=YOUR_TRONGRID_API_KEY
-TRONGRID_BASE=https://api.trongrid.io
+TRONGRID_BASE=https://nile.trongrid.io
+TRONSCAN_BASE=https://nileapi.tronscan.org
+TRONGRID_API_KEY=
+TRONSCAN_API_KEY=
 ```
+说明：Nile 测试网接口无需 API key，单 IP QPS 限流 50。
 
-### 3) 启动 Server + Web
+### 3) 启动后端
 ```
 cd tron-mcp-poc\server
 npm run dev
 ```
+
+### 4) 启动前端
 ```
-cd ..\web
+cd tron-mcp-poc\web
 npm run dev
 ```
 
-Web 访问：`http://localhost:5173`
+打开：`http://localhost:5173`
 
-## 功能列表
-- MCP 工具：`get_network_status` / `get_usdt_balance` / `get_tx_status`
-- HTTP Bridge：`/tools`、`/call`、`/health`
-- MCP stdio：可接入 Claude Desktop
-- Web Console：输入地址/txid 查看实时结果
+## 使用示例
 
-## 工具输入输出示例
-
-### 输入示例
+### HTTP Bridge
 ```
-POST /call
-{
-  "tool": "get_usdt_balance",
-  "args": {
-    "address": "TB3Ttmeh5bgesBmMSqRSjpSmBsufKNgjAN"
-  }
-}
+curl http://localhost:8787/tools
 ```
 
-### 输出示例
 ```
-{
-  "ok": true,
-  "tool": "get_usdt_balance",
-  "chain": "TRON",
-  "data": {
-    "address": "TB3Ttmeh5bgesBmMSqRSjpSmBsufKNgjAN",
-    "trx": { "balance": "0.09", "balanceSun": "91638" },
-    "usdt": { "balance": "0", "balanceRaw": "0", "decimals": 6, "contract": "TR7N..." }
-  },
-  "summary": { "zh": "该地址 USDT 余额 0.00，TRX 余额 0.09" },
-  "meta": { "ts": 0, "source": "trongrid", "requestId": "..." }
-}
+curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d "{\"tool\":\"get_usdt_balance\",\"args\":{\"address\":\"TB3Ttmeh5bgesBmMSqRSjpSmBsufKNgjAN\"}}"
 ```
 
-## MCP / Claude Desktop
-- 配置示例：`tron-mcp-poc/server/mcp.json`
-- 启动 stdio：
+### MCP stdio（Claude Desktop）
 ```
 cd tron-mcp-poc\server
 npm run mcp:stdio
 ```
+配置模板：`tron-mcp-poc/server/mcp.json`
+
+## Claude Desktop 演示流程
+1) 在 Claude 中输入："查询地址 TB3Ttmeh5bgesBmMSqRSjpSmBsufKNgjAN 的 USDT 余额，并给出风险提示"
+2) Claude 调用 MCP 工具 `get_usdt_balance`
+3) 返回结构化结果（含 `addressMeta`）
+4) Claude 输出自然语言总结
+
+## 配置说明
+- `TRONGRID_BASE`：TronGrid API 基础地址（Nile: `https://nile.trongrid.io`）
+- `TRONSCAN_BASE`：TronScan API 基础地址（Nile: `https://nileapi.tronscan.org`）
+- `TRONGRID_API_KEY` / `TRONSCAN_API_KEY`：Nile 测试网可留空
+
+## 常见问题
+- 开发和演示必须基于 Nile 测试网
+- 接口 QPS 限流 50（单 IP）
+- 若需要测试网 TRX，可用水龙头或联系主办方
+
+## 联系方式
+- Discord：#gwdc·hackathon-support
+- Nile 测试网水龙头：`https://nileex.io/join/getJoinPage`
+
+## 参赛提交材料
+必须提交：
+- 源代码：GitHub 公有仓库
+- `README.md`：项目说明与快速开始
+- 部署文档：`docs/deployment.md`
+- API 文档：`docs/api.md`
+
+推荐提交：
+- 架构文档：`docs/architecture.md`
+- 测试报告：`docs/test-report.md`
+- 性能报告：`docs/perf-report.md`
+- 安全审计：`docs/security.md`
+- 商业计划：`docs/business.md`
+- 演示视频：5-10 分钟
 
 ## 截图占位
 - Web Console 主界面（截图待补）
 - MCP 调用结果（截图待补）
 - 终端调用示例（截图待补）
-
-## 参赛材料
-- `docs/demo-script.md`（3分钟 Demo 讲解词 + 分镜）
-- `docs/pitch-deck-outline.md`（10页以内 pitch deck 大纲）

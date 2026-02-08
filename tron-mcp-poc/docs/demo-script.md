@@ -17,6 +17,7 @@
   - 我们先在 Web Console 输入地址和 txid。
   - 点击 **Network Status**，返回最新区块高度和时间戳。
   - 点击 **USDT Balance**，看到 USDT 与 TRX 余额，并处理 decimals。
+  - 同时展示地址安全快照：Base58 校验结果、地址 Hex、风险提示。
   - 点击 **Tx Status**，返回交易状态与确认时间。
 
 ## 1:20 - 2:10  MCP 能力演示（Claude Desktop）
@@ -25,12 +26,13 @@
   - 同一套工具也可以在 Claude Desktop 里调用。
   - 通过 `mcp.json` 配置即可连接 stdio MCP Server。
   - Claude 直接调用 `get_usdt_balance`，返回结构化结果，便于自动化编排。
+  - 展示“自然语言 -> MCP 调用 -> 结构化结果 -> 解释输出”的完整链路。
 
 ## 2:10 - 2:40  技术亮点
 - 讲解词：
   - 统一的工具接口格式：ok/tool/chain/data/summary/meta。
   - 8 秒超时 + 429 退避重试，保证稳定性。
-  - 支持本地开发与上线部署，API Key 通过 `.env` 配置。
+  - Base58 地址解析与风险提示，满足安全场景展示。
 
 ## 2:40 - 3:00  收尾与展望
 - 讲解词：

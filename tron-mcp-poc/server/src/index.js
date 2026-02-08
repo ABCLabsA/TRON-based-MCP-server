@@ -169,6 +169,46 @@ function upstreamError(tool, err, source) {
   }, source);
 }
 
+function parseAddressMeta(address) {
+  try {
+    if (typeof address !== "string") {
+      return { base58Valid: false, addressHex: null, network: "unknown", riskHint: "地址格式异常" };
+    }
+    const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+    let num = 0n;
+    let leading = 0;
+    for (let i = 0; i < address.length && address[i] === "1"; i += 1) {
+      leading += 1;
+    }
+    for (const ch of address) {
+      const idx = alphabet.indexOf(ch);
+      if (idx < 0) throw new Error("Invalid base58 character");
+      num = num * 58n + BigInt(idx);
+    }
+
+    let hex = num.toString(16);
+    if (hex.length % 2 === 1) hex = `0${hex}`;
+    const bytes = Buffer.from(hex, "hex");
+    const payload = Buffer.concat([Buffer.alloc(leading, 0), bytes]);
+
+    if (payload.length < 4) throw new Error("Invalid base58 length");
+    const addrPayload = payload.slice(0, -4);
+    const addressHex = addrPayload.toString("hex");
+
+    let network = "unknown";
+    if (addressHex.startsWith("41")) network = "TRON";
+
+    return {
+      base58Valid: true,
+      addressHex,
+      network,
+      riskHint: "未发现明显风险"
+    };
+  } catch (err) {
+    return { base58Valid: false, addressHex: null, network: "unknown", riskHint: "地址 Base58 校验失败" };
+  }
+}
+
 async function handleToolCall(tool, args) {
   if (typeof tool !== "string") {
     return { status: 400, body: jsonError(tool ?? "unknown", "INVALID_REQUEST", "tool must be a string") };
@@ -237,8 +277,9 @@ async function handleToolCall(tool, args) {
       const usdtRaw = usdtHex ? BigInt(`0x${usdtHex}`).toString() : "0";
       const usdtDecimals = 6;
       const usdtBalance = formatTokenAmount(usdtRaw, usdtDecimals);
+      const addressMeta = parseAddressMeta(address);
 
-      const summary = `该地址 USDT 余额 ${toFixed2(usdtBalance)}，TRX 余额 ${toFixed2(trxBalance)}`;
+      const summary = `该地址 USDT 余额 ${toFixed2(usdtBalance)}，TRX 余额 ${toFixed2(trxBalance)}。地址校验：${addressMeta.base58Valid ? "通过" : "失败"}`;
       return {
         status: 200,
         body: jsonOk(
@@ -251,7 +292,8 @@ async function handleToolCall(tool, args) {
               balanceRaw: String(usdtRaw ?? "0"),
               decimals: usdtDecimals,
               contract: USDT_CONTRACT
-            }
+            },
+            addressMeta
           },
           summary,
           "trongrid"

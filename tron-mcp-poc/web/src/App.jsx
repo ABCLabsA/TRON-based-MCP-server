@@ -95,6 +95,8 @@ export default function App() {
     callTool("get_tx_status", { txid });
   }
 
+  const addressMeta = result?.data?.addressMeta;
+
   return (
     <div className="app">
       <div className="orb orb-1" />
@@ -186,6 +188,30 @@ export default function App() {
           </span>
         </div>
       </section>
+
+      {addressMeta && (
+        <section className="panel" style={{ marginTop: 18 }}>
+          <h3 className="panel-title">Address Safety Snapshot</h3>
+          <div className="safety-grid">
+            <div className="safety-card">
+              <div className="label">Base58 Valid</div>
+              <div className="value">{addressMeta.base58Valid ? "YES" : "NO"}</div>
+            </div>
+            <div className="safety-card">
+              <div className="label">Network</div>
+              <div className="value">{addressMeta.network}</div>
+            </div>
+            <div className="safety-card">
+              <div className="label">Address Hex</div>
+              <div className="value mono">{addressMeta.addressHex || "-"}</div>
+            </div>
+            <div className="safety-card">
+              <div className="label">Risk Hint</div>
+              <div className="value">{addressMeta.riskHint || "-"}</div>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="panel" style={{ marginTop: 18 }}>
         <h3 className="panel-title">Response</h3>
