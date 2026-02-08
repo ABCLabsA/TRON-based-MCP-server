@@ -11,6 +11,7 @@ TRON Nile 测试网的 MCP 工具化示例，提供 HTTP Bridge + MCP stdio + We
 - `get_network_status`：查询最新区块高度与时间戳
 - `get_usdt_balance`：查询 TRC20 USDT 余额（含 TRX 余额）
 - `get_tx_status`：查询交易状态与确认时间
+- `get_account_profile`：账户画像（余额 + 最近交易统计）
 - 地址安全快照：Base58 校验、地址 Hex、风险提示
 
 ## 技术栈

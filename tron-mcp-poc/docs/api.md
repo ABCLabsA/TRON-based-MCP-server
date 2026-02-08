@@ -43,6 +43,15 @@ curl http://localhost:8787/tools
 { "tool": "get_tx_status", "args": { "txid": "<64-hex>" } }
 ```
 
+### get_account_profile
+```
+{ "tool": "get_account_profile", "args": { "address": "T..." } }
+```
+
+返回包含：
+- `addressMeta`：Base58 校验/地址 Hex/风险提示
+- `activity`：最近交易统计
+
 ## 校验规则
 - address：以 `T` 开头，长度 30~40
 - txid：64 位 hex

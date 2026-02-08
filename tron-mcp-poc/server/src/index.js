@@ -2,7 +2,7 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import { getTransactionInfo } from "./providers/tronscan.js";
-import { getAccount, getNowBlock, getTrc20Balance } from "./providers/trongrid.js";
+import { getAccount, getAccountTransactions, getChainParameters, getNowBlock, getTrc20Balance } from "./providers/trongrid.js";
 import { startMcpServer } from "./mcp.js";
 
 const DEFAULT_HTTP_PORT = 8787;
@@ -58,6 +58,16 @@ const TOOLS = [
       type: "object",
       properties: { txid: { type: "string" } },
       required: ["txid"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "get_account_profile",
+    description: "Advanced account profile with balances and recent activity.",
+    inputSchema: {
+      type: "object",
+      properties: { address: { type: "string" } },
+      required: ["address"],
       additionalProperties: false
     }
   }
@@ -152,6 +162,14 @@ function toStatus(info) {
   return "SUCCESS";
 }
 
+function pickChainParam(params, key) {
+  if (!Array.isArray(params)) return null;
+  const found = params.find((p) => p?.key === key);
+  if (!found || found.value === undefined || found.value === null) return null;
+  const n = Number(found.value);
+  return Number.isNaN(n) ? found.value : n;
+}
+
 function logUpstream(meta, bodySnippet) {
   if (process.env.NODE_ENV === "production") return;
   if (!meta) return;
@@ -209,6 +227,26 @@ function parseAddressMeta(address) {
   }
 }
 
+function summarizeTxs(list, address) {
+  const base58 = address;
+  let inbound = 0;
+  let outbound = 0;
+  let total = 0;
+  let lastTimestamp = null;
+  for (const tx of list) {
+    total += 1;
+    const owner = tx?.raw_data?.contract?.[0]?.parameter?.value?.owner_address;
+    const to = tx?.raw_data?.contract?.[0]?.parameter?.value?.to_address;
+    const ts = tx?.block_timestamp || tx?.raw_data?.timestamp || null;
+    if (!lastTimestamp && ts) lastTimestamp = ts;
+
+    if (owner === base58) outbound += 1;
+    if (to === base58) inbound += 1;
+  }
+
+  return { total, inbound, outbound, lastTimestamp };
+}
+
 async function handleToolCall(tool, args) {
   if (typeof tool !== "string") {
     return { status: 400, body: jsonError(tool ?? "unknown", "INVALID_REQUEST", "tool must be a string") };
@@ -220,18 +258,31 @@ async function handleToolCall(tool, args) {
 
   if (tool === "get_network_status") {
     try {
-      const block = await getNowBlock();
+      const [block, params] = await Promise.all([
+        getNowBlock(),
+        getChainParameters()
+      ]);
       const number = block?.block_header?.raw_data?.number ?? null;
       const timestamp = block?.block_header?.raw_data?.timestamp ?? null;
+      const list = params?.chainParameter || params?.chain_parameters || [];
+      const energyFee = pickChainParam(list, "getEnergyFee");
+      const transactionFee = pickChainParam(list, "getTransactionFee");
+      const bandwidthPrice = pickChainParam(list, "getBandwidthPrice");
+      const gas = {
+        energyFee,
+        transactionFee,
+        bandwidthPrice
+      };
       return {
         status: 200,
         body: jsonOk(
           tool,
           {
             latestBlock: { number, timestamp },
+            gas,
             health: "ok"
           },
-          "网络正常",
+          "网络正常（已获取 Gas 参数）",
           "trongrid"
         )
       };
@@ -325,6 +376,84 @@ async function handleToolCall(tool, args) {
       };
     } catch (err) {
       return { status: 502, body: upstreamError(tool, err, "tronscan") };
+    }
+  }
+
+  if (tool === "get_account_profile") {
+    const { address } = args ?? {};
+    if (!isValidAddress(address)) {
+      return { status: 400, body: jsonError(tool, "INVALID_ADDRESS", "address must start with T and length 30-40") };
+    }
+
+    if (!process.env.TRONGRID_API_KEY) {
+      return {
+        status: 401,
+        body: jsonError(
+          tool,
+          "MISSING_API_KEY",
+          "TRONGRID_API_KEY is required",
+          {},
+          "trongrid",
+          "请在 server/.env 配置 TRONGRID_API_KEY"
+        )
+      };
+    }
+
+    try {
+      const [acctRes, usdtRes, txRes] = await Promise.all([
+        getAccount(address, { includeMeta: true }),
+        getTrc20Balance(address, USDT_CONTRACT, { includeMeta: true }),
+        getAccountTransactions(address, { includeMeta: true })
+      ]);
+
+      logUpstream(acctRes.meta);
+      logUpstream(usdtRes.meta);
+      logUpstream(txRes.meta);
+
+      const acct = acctRes.data;
+      const trxBalanceSun = acct?.balance ?? 0;
+      const trxBalance = formatTokenAmount(trxBalanceSun, 6);
+
+      const usdtHex = extractTrc20Balance(usdtRes.data);
+      const usdtRaw = usdtHex ? BigInt(`0x${usdtHex}`).toString() : "0";
+      const usdtDecimals = 6;
+      const usdtBalance = formatTokenAmount(usdtRaw, usdtDecimals);
+      const addressMeta = parseAddressMeta(address);
+
+      const txList = Array.isArray(txRes?.data?.data) ? txRes.data.data : [];
+      const summaryTx = summarizeTxs(txList, address);
+      const lastTime = summaryTx.lastTimestamp ? new Date(summaryTx.lastTimestamp).toISOString() : null;
+
+      const summary = `近 ${summaryTx.total} 笔交易，入账 ${summaryTx.inbound}，出账 ${summaryTx.outbound}，最近一笔 ${lastTime || "未知"}`;
+      return {
+        status: 200,
+        body: jsonOk(
+          tool,
+          {
+            address,
+            trx: { balance: trxBalance, balanceSun: String(trxBalanceSun) },
+            usdt: {
+              balance: usdtBalance,
+              balanceRaw: String(usdtRaw ?? "0"),
+              decimals: usdtDecimals,
+              contract: USDT_CONTRACT
+            },
+            addressMeta,
+            activity: {
+              recentCount: summaryTx.total,
+              inbound: summaryTx.inbound,
+              outbound: summaryTx.outbound,
+              lastTimestamp: summaryTx.lastTimestamp,
+              lastIso: lastTime
+            }
+          },
+          summary,
+          "trongrid"
+        )
+      };
+    } catch (err) {
+      logUpstream({ url: err.url, status: err.status, contentType: err.contentType }, err.bodySnippet);
+      return { status: 502, body: upstreamError(tool, err, "trongrid") };
     }
   }
 

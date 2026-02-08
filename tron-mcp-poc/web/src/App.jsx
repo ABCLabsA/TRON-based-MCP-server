@@ -1,7 +1,12 @@
 ﻿import { useEffect, useMemo, useState } from "react";
+import "./App.css";
 
 const ADDRESS_RE = /^T.{29,39}$/;
 const TXID_RE = /^[0-9a-fA-F]{64}$/;
+
+function formatToolName(name) {
+  return name.replace(/_/g, " ");
+}
 
 export default function App() {
   const base = useMemo(() => {
@@ -16,6 +21,7 @@ export default function App() {
   const [summary, setSummary] = useState("");
   const [result, setResult] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
+  const [showHex, setShowHex] = useState(false);
   const addressHint = "请先输入 Address";
   const txidHint = "请先输入 Txid";
   const disableAddressActions = status === "loading" || !address;
@@ -95,7 +101,20 @@ export default function App() {
     callTool("get_tx_status", { txid });
   }
 
+  function onAccountProfile() {
+    if (!ADDRESS_RE.test(address)) {
+      setStatus("error");
+      setErrorMsg("Address must start with T and length 30-40");
+      return;
+    }
+    callTool("get_account_profile", { address });
+  }
+
   const addressMeta = result?.data?.addressMeta;
+  const activity = result?.data?.activity;
+  const gas = result?.data?.gas;
+  const hex = addressMeta?.addressHex || "";
+  const shortHex = hex ? `${hex.slice(0, 8)}…${hex.slice(-6)}` : "-";
 
   return (
     <div className="app">
@@ -156,12 +175,12 @@ export default function App() {
       <section className="panel" style={{ marginTop: 18 }}>
         <h3 className="panel-title">Actions</h3>
         <div className="actions">
-          <span className="hint-wrap" data-tooltip={showAddressHint ? addressHint : ""}>
+          <span className="hint-wrap" data-tooltip="">
             <button
               onClick={onNetworkStatus}
-              disabled={disableAddressActions}
+              disabled={status === "loading"}
               className="btn primary"
-              style={{ pointerEvents: disableAddressActions ? "none" : "auto" }}
+              style={{ pointerEvents: status === "loading" ? "none" : "auto" }}
             >
               Network Status
             </button>
@@ -176,6 +195,16 @@ export default function App() {
               USDT Balance
             </button>
           </span>
+          <span className="hint-wrap" data-tooltip={showAddressHint ? addressHint : ""}>
+            <button
+              onClick={onAccountProfile}
+              disabled={disableAddressActions}
+              className="btn tertiary"
+              style={{ pointerEvents: disableAddressActions ? "none" : "auto" }}
+            >
+              Account Profile
+            </button>
+          </span>
           <span className="hint-wrap" data-tooltip={showTxidHint ? txidHint : ""}>
             <button
               onClick={onTxStatus}
@@ -187,6 +216,14 @@ export default function App() {
             </button>
           </span>
         </div>
+      </section>
+
+      <section className="panel" style={{ marginTop: 18 }}>
+        <h3 className="panel-title">Response</h3>
+        {status === "loading" && <div className="loading">Running request</div>}
+        {errorMsg && <div className="error">Error: {errorMsg}</div>}
+        {summary && <div className="summary">{summary}</div>}
+        <pre className="result">{result ? JSON.stringify(result, null, 2) : "(no result)"}</pre>
       </section>
 
       {addressMeta && (
@@ -203,7 +240,14 @@ export default function App() {
             </div>
             <div className="safety-card">
               <div className="label">Address Hex</div>
-              <div className="value mono">{addressMeta.addressHex || "-"}</div>
+              <div className="value mono clamp">
+                {showHex ? hex : shortHex}
+              </div>
+              {hex && (
+                <button className="link-btn" onClick={() => setShowHex((v) => !v)}>
+                  {showHex ? "收起" : "展开"}
+                </button>
+              )}
             </div>
             <div className="safety-card">
               <div className="label">Risk Hint</div>
@@ -213,17 +257,76 @@ export default function App() {
         </section>
       )}
 
-      <section className="panel" style={{ marginTop: 18 }}>
-        <h3 className="panel-title">Response</h3>
-        {status === "loading" && <div className="loading">Running request</div>}
-        {errorMsg && <div className="error">Error: {errorMsg}</div>}
-        {summary && <div className="summary">{summary}</div>}
-        <pre className="result">{result ? JSON.stringify(result, null, 2) : "(no result)"}</pre>
-      </section>
+      {gas && (
+        <section className="panel" style={{ marginTop: 18 }}>
+          <h3 className="panel-title">Network Gas</h3>
+          <div className="safety-grid gas">
+            <div className="safety-card">
+              <div className="label">Energy Fee</div>
+              <div className="value mono">{gas.energyFee ?? "-"}</div>
+            </div>
+            <div className="safety-card">
+              <div className="label">Transaction Fee</div>
+              <div className="value mono">{gas.transactionFee ?? "-"}</div>
+            </div>
+            <div className="safety-card">
+              <div className="label">Bandwidth Price</div>
+              <div className="value mono">{gas.bandwidthPrice ?? "-"}</div>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {activity && (
+        <section className="panel" style={{ marginTop: 18 }}>
+          <h3 className="panel-title">Account Activity</h3>
+          <div className="safety-grid">
+            <div className="safety-card">
+              <div className="label">Recent Count</div>
+              <div className="value">{activity.recentCount}</div>
+            </div>
+            <div className="safety-card">
+              <div className="label">Inbound</div>
+              <div className="value">{activity.inbound}</div>
+            </div>
+            <div className="safety-card">
+              <div className="label">Outbound</div>
+              <div className="value">{activity.outbound}</div>
+            </div>
+            <div className="safety-card">
+              <div className="label">Last Seen</div>
+              <div className="value mono clamp">{activity.lastIso || "-"}</div>
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="panel" style={{ marginTop: 18 }}>
-        <h3 className="panel-title">Tools (from /tools)</h3>
-        <div className="tools">{tools.length ? JSON.stringify(tools, null, 2) : "(no tools loaded)"}</div>
+        <div className="tools-header">
+          <div>
+            <h3 className="panel-title">Tools</h3>
+            <p className="tools-sub">Loaded from <code>/tools</code>. Click a tool to copy its name.</p>
+          </div>
+          <span className="tools-count">{tools.length} tools</span>
+        </div>
+        <div className="tools-grid">
+          {tools.length === 0 && <div className="tools-empty">(no tools loaded)</div>}
+          {tools.map((tool) => (
+            <button
+              key={tool.name}
+              className="tool-card"
+              onClick={() => navigator.clipboard?.writeText(tool.name)}
+            >
+              <div className="tool-title">{formatToolName(tool.name)}</div>
+              <div className="tool-name">{tool.name}</div>
+              <div className="tool-desc">{tool.description || "-"}</div>
+              <div className="tool-tags">
+                <span>JSON Schema</span>
+                <span>{tool.inputSchema?.required?.length ? `${tool.inputSchema.required.length} req` : "0 req"}</span>
+              </div>
+            </button>
+          ))}
+        </div>
       </section>
     </div>
   );

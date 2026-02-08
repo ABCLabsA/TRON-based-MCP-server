@@ -55,6 +55,16 @@ export async function getNowBlock(options = {}) {
   });
 }
 
+export async function getChainParameters(options = {}) {
+  const url = `${BASE}/wallet/getchainparameters`;
+  return fetchJson(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers() },
+    body: JSON.stringify({}),
+    ...options
+  });
+}
+
 export async function getAccount(address, options = {}) {
   const url = `${BASE}/wallet/getaccount`;
   return fetchJson(url, {
@@ -83,4 +93,14 @@ export async function getTrc20Balance(address, contractAddress, options = {}) {
     body: JSON.stringify(payload),
     ...options
   });
+}
+
+export async function getAccountTransactions(address, options = {}) {
+  const params = new URLSearchParams({
+    limit: "20",
+    only_confirmed: "true",
+    order_by: "block_timestamp,desc"
+  });
+  const url = `${BASE}/v1/accounts/${encodeURIComponent(address)}/transactions?${params.toString()}`;
+  return fetchJson(url, { headers: headers(), ...options });
 }
