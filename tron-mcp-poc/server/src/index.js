@@ -4,12 +4,18 @@ import crypto from "node:crypto";
 import { getTransactionInfo } from "./providers/tronscan.js";
 import { getAccount, getAccountTransactions, getChainParameters, getNowBlock, getTrc20Balance, toHexAddress } from "./providers/trongrid.js";
 import { startMcpServer } from "./mcp.js";
+import { quoteBySide, splitPlan as buildSplitPlan } from "./robinpump/curve.js";
 
 const DEFAULT_HTTP_PORT = 8787;
 const PORT = Number(process.env.PORT || DEFAULT_HTTP_PORT);
 const MCP_HTTP_PORT = Number(process.env.MCP_HTTP_PORT || PORT);
 const USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
 const SERVER_INFO = { name: "tron-mcp-server", version: "0.1.0" };
+
+const RP_PRESETS = {
+  A: { virtualBase: 120000, virtualToken: 6000000, feeBps: 30 },
+  B: { virtualBase: 200000, virtualToken: 4000000, feeBps: 50 }
+};
 
 function sendJson(res, status, body) {
   const data = JSON.stringify(body);
@@ -112,7 +118,57 @@ const TOOLS = [
       additionalProperties: false
     }
   }
-];
+,
+  {
+    name: "rp_quote",
+    description: "RobinPump bonding-curve quote preview for buy/sell.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        preset: { type: "string", enum: ["A", "B"] },
+        side: { type: "string", enum: ["buy", "sell"] },
+        amountIn: { type: "number", exclusiveMinimum: 0 },
+        curve: {
+          type: "object",
+          properties: {
+            virtualBase: { type: "number", exclusiveMinimum: 0 },
+            virtualToken: { type: "number", exclusiveMinimum: 0 },
+            feeBps: { type: "integer", minimum: 0, maximum: 5000 }
+          },
+          required: ["virtualBase", "virtualToken"],
+          additionalProperties: false
+        }
+      },
+      required: ["side", "amountIn"],
+      additionalProperties: false
+    }
+  },
+  {
+    name: "rp_split_plan",
+    description: "RobinPump split-order planner under slippage budget.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        preset: { type: "string", enum: ["A", "B"] },
+        side: { type: "string", enum: ["buy", "sell"] },
+        totalAmountIn: { type: "number", exclusiveMinimum: 0 },
+        parts: { type: "integer", minimum: 2, maximum: 50 },
+        maxSlippageBps: { type: "integer", minimum: 0, maximum: 5000 },
+        curve: {
+          type: "object",
+          properties: {
+            virtualBase: { type: "number", exclusiveMinimum: 0 },
+            virtualToken: { type: "number", exclusiveMinimum: 0 },
+            feeBps: { type: "integer", minimum: 0, maximum: 5000 }
+          },
+          required: ["virtualBase", "virtualToken"],
+          additionalProperties: false
+        }
+      },
+      required: ["side", "totalAmountIn", "parts", "maxSlippageBps"],
+      additionalProperties: false
+    }
+  }];
 
 function jsonError(tool, code, message, extra = {}, source = "tronscan/trongrid", summaryZh = "") {
   return {
@@ -322,6 +378,22 @@ function summarizeTxs(list, address) {
   return { total, inbound, outbound, lastTimestamp };
 }
 
+function resolveCurveInput(curve, preset) {
+  if (curve && typeof curve === "object") {
+    return {
+      virtualBase: Number(curve.virtualBase),
+      virtualToken: Number(curve.virtualToken),
+      feeBps: curve.feeBps === undefined ? 0 : Number(curve.feeBps)
+    };
+  }
+
+  const key = typeof preset === "string" && preset ? preset.toUpperCase() : "A";
+  const picked = RP_PRESETS[key];
+  if (!picked) {
+    throw new Error(`Unknown preset '${preset}'. Use A or B.`);
+  }
+  return picked;
+}
 async function handleToolCall(tool, args) {
   if (typeof tool !== "string") {
     return { status: 400, body: jsonError(tool ?? "unknown", "INVALID_REQUEST", "tool must be a string") };
@@ -440,6 +512,97 @@ async function handleToolCall(tool, args) {
     }
   }
 
+  if (tool === "rp_quote") {
+    try {
+      const side = args?.side;
+      const amountIn = Number(args?.amountIn);
+      if (side !== "buy" && side !== "sell") {
+        return { status: 400, body: jsonError(tool, "INVALID_PARAMS", "side must be buy or sell") };
+      }
+      if (!Number.isFinite(amountIn) || amountIn <= 0) {
+        return { status: 400, body: jsonError(tool, "INVALID_PARAMS", "amountIn must be > 0") };
+      }
+
+      const curve = resolveCurveInput(args?.curve, args?.preset);
+      const quote = quoteBySide(curve, side, amountIn);
+      const keyFacts = {
+        amountIn: quote.amountIn,
+        amountOut: quote.amountOut,
+        avgPrice: quote.avgPrice,
+        spotPriceBefore: quote.spotPriceBefore,
+        spotPriceAfter: quote.spotPriceAfter,
+        priceImpactPct: quote.priceImpactPct
+      };
+
+      const summary = `${side.toUpperCase()} quote: in ${quote.amountIn}, out ${quote.amountOut}, impact ${quote.priceImpactPct}%`;
+      return {
+        status: 200,
+        body: jsonOk(tool, {
+          summary,
+          key_facts: keyFacts,
+          next_steps: ["Run rp_split_plan to compare single vs split execution."],
+          raw: { side, preset: args?.preset ?? "A", curve, quote }
+        }, summary, "robinpump-sim")
+      };
+    } catch (err) {
+      return { status: 400, body: jsonError(tool, "INVALID_PARAMS", err.message || "invalid params") };
+    }
+  }
+
+  if (tool === "rp_split_plan") {
+    try {
+      const side = args?.side;
+      const totalAmountIn = Number(args?.totalAmountIn);
+      const parts = Number(args?.parts);
+      const maxSlippageBps = Number(args?.maxSlippageBps);
+
+      if (side !== "buy" && side !== "sell") {
+        return { status: 400, body: jsonError(tool, "INVALID_PARAMS", "side must be buy or sell") };
+      }
+      if (!Number.isFinite(totalAmountIn) || totalAmountIn <= 0) {
+        return { status: 400, body: jsonError(tool, "INVALID_PARAMS", "totalAmountIn must be > 0") };
+      }
+      if (!Number.isInteger(parts) || parts < 2 || parts > 50) {
+        return { status: 400, body: jsonError(tool, "INVALID_PARAMS", "parts must be integer in [2, 50]") };
+      }
+      if (!Number.isInteger(maxSlippageBps) || maxSlippageBps < 0 || maxSlippageBps > 5000) {
+        return { status: 400, body: jsonError(tool, "INVALID_PARAMS", "maxSlippageBps must be integer in [0, 5000]") };
+      }
+
+      const curve = resolveCurveInput(args?.curve, args?.preset);
+      const planned = buildSplitPlan(curve, side, totalAmountIn, parts);
+      const singleTradeImpactPct = planned.single.priceImpactPct;
+      const splitAvgImpactPct = planned.splitAvgImpactPct;
+      const comparison = {
+        singleTradeImpactPct,
+        splitAvgImpactPct,
+        splitTotalOut: planned.splitTotalOut,
+        singleTotalOut: planned.single.amountOut
+      };
+
+      const splitAvgImpactBps = splitAvgImpactPct * 100;
+      const nextSteps = [];
+      if (splitAvgImpactBps > maxSlippageBps) {
+        nextSteps.push("Split plan exceeds slippage budget; increase parts or reduce total amount.");
+      } else {
+        nextSteps.push("Split plan is within slippage budget.");
+      }
+      nextSteps.push("Use rp_quote for fine-grained per-order previews.");
+
+      const summary = `Split ${parts} parts: single impact ${singleTradeImpactPct}% vs split avg ${splitAvgImpactPct}%`;
+      return {
+        status: 200,
+        body: jsonOk(tool, {
+          summary,
+          plan: planned.plan,
+          comparison,
+          next_steps: nextSteps
+        }, summary, "robinpump-sim")
+      };
+    } catch (err) {
+      return { status: 400, body: jsonError(tool, "INVALID_PARAMS", err.message || "invalid params") };
+    }
+  }
   if (tool === "verify_unsigned_tx") {
     const unsignedTx = args?.unsignedTx;
     const argRawDataHex = args?.rawDataHex;
@@ -710,3 +873,6 @@ if (useStdio) {
 } else {
   startHttpServer();
 }
+
+
+
