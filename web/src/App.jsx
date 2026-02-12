@@ -340,7 +340,7 @@ export default function App() {
       <div className="orb orb-2" />
 
       <header className="hero">
-        <h1 className="hero-title">TRON MCP Console</h1>
+        <h1 className="hero-title">RobinPump Copilot</h1>
         <p className="hero-sub">
           A focused command surface for probing TRON network status, balances,
           and transaction health. Keep requests tight, inspect structured
