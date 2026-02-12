@@ -1,149 +1,91 @@
-﻿# 🚀 RobinPump Trading Copilot（MCP + Web Console）
+﻿# 🚀 RobinPump Trading Copilot（TRON MCP + Web Console）
 
-⭐ 面向 RobinPump.fun 的交易前辅助系统：提供 `quote` 预演、滑点评估与拆单计划（split plan），帮助用户更高效执行交易。
+> Pre-trade quote + slippage + split-order plan for bonding-curve tokens, making RobinPump trading more efficient.
 
-## ✨ 项目定位
-RobinPump 等 bonding curve 场景里，单笔大额交易常见问题是：
-- 滑点过大
-- 执行效率低
-- 缺少下单前可解释的预演与建议
+## ✅ Submission Requirements 对照
 
-本项目在现有 TRON MCP Server 基础上做最小改造，升级为 **DeFi Track Trading Copilot**。
+| 要求 | 状态 | 说明 |
+| --- | --- | --- |
+| 1. 使用相关区块链技术 | 已满足 | TRON + TronGrid + TronScan + TronLink |
+| 2. 开源可用 | 已满足 | 仓库公开 + `LICENSE` |
+| 3. 短摘要（<150 chars） | 已满足 | 本文顶部 summary |
+| 4. 完整描述（问题/方案/实现） | 已满足 | `Problem` / `Solution` / `How It Works` |
+| 5. 技术描述（SDK + sponsor tech） | 已满足 | `Technical Stack` |
+| 6. Canva Slides 链接 | 待补 | `Submission Assets` |
+| 7a. Demo 视频 | 待补 | `Submission Assets` |
+| 7b. UI 截图 | 待补 | `demo/screenshots/` |
+| 7c. 区块链交互说明 | 已满足 | `How It Works with TRON` |
+| 7d. Loom（带语音讲解） | 待补 | `Submission Assets` |
 
-## 🧩 核心功能模块
-### 1) 多维度链上数据连接（TRON）
+## 🧠 Problem
+- bonding curve 场景单笔大单滑点高
+- 下单前缺少可解释预演
+- 缺少可执行的拆单建议
+
+## 🛠 Solution
+- `rp_quote`：交易前报价与冲击预演
+- `rp_split_plan`：生成拆单方案并对比 single vs split
+- 保留 TRON 原能力：网络状态、余额、交易状态、账户画像、未签名交易验证与创建
+
+## ⚙️ Technical Stack
+- Node.js (ESM)
+- `@modelcontextprotocol/sdk`
+- TronGrid API / TronScan API
+- React + Vite
+- TronLink（签名广播）
+
+## 🔗 How It Works with TRON
+1. 客户端调用 `/tools` 获取工具目录。
+2. 通过 `/call` 调用 `rp_quote` / `rp_split_plan`。
+3. 服务端请求 TronGrid/TronScan 返回结构化结果。
+4. 执行闭环时，服务端生成 unsigned tx，前端用 TronLink 签名并广播。
+
+## 🧩 Tool Catalog
+### RobinPump Copilot
+- `rp_quote`
+- `rp_split_plan`
+
+### TRON Core
 - `get_network_status`
 - `get_usdt_balance`
 - `get_tx_status`
 - `get_account_profile`
 - `verify_unsigned_tx`
-- `create_unsigned_transfer`（可作为执行链路示例）
+- `create_unsigned_transfer`
 
-### 2) MCP 标准封装
-- 支持 `tools/list` 与 `tools/call`
-- 提供 HTTP Bridge：`/tools`、`/call`、`/mcp`
-- 可被支持 MCP 的客户端识别与调用
-
-### 3) 安全与可读化
-- 地址校验与 Base58/Hex 元数据输出
-- 返回结构带摘要字段，便于人类与 AI Agent 理解
-
-## 🧠 RobinPump Copilot 扩展工具
-### `rp_quote`
-用于买入/卖出预演（基于虚拟储备常数乘积模型），输出：
-- `amountOut`
-- `avgPrice`
-- `spotPriceBefore` / `spotPriceAfter`
-- `priceImpactPct`
-
-### `rp_split_plan`
-用于拆单建议与对比分析，输出：
-- 分笔执行计划（plan）
-- `singleTradeImpactPct` 与 `splitAvgImpactPct` 对比
-- `singleTotalOut` 与 `splitTotalOut` 对比
-
-## 🖥️ Web Console 演示（3–5 分钟）
-1. 打开 Web Console。
-2. 进入 **RobinPump Copilot** 区域。
-3. 点击 `Preset A (Low Liquidity)`。
-4. 点击 `Run rp_quote`。
-5. 点击 `Run rp_split_plan`。
-6. 展示 `single vs split` 对比，说明拆单收益。
-
-## ⚡ Judge Quickstart（不打开 UI 也可验收）
-先启动服务端：
-
+## ⚡ Judge Quickstart
 ```powershell
 cd server
 npm install
 npm run dev
 ```
 
-### 1) 查看工具列表
 ```bash
 curl -s http://localhost:8787/tools | jq .
+curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d '{"tool":"rp_quote","args":{"preset":"A","side":"buy","amountIn":100}}' | jq .
+curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d '{"tool":"rp_split_plan","args":{"preset":"A","side":"buy","totalAmountIn":100,"parts":4,"maxSlippageBps":300}}' | jq .
 ```
 
-### 2) 运行 quote（Preset A）
-```bash
-curl -X POST http://localhost:8787/call \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tool":"rp_quote",
-    "args":{
-      "preset":"A",
-      "side":"buy",
-      "amountIn":100
-    }
-  }' | jq .
-```
+Expected:
+- 工具列表包含 `rp_quote` / `rp_split_plan`
+- `singleTradeImpactPct > splitAvgImpactPct`
+- `summary` 给出拆单建议
 
-### 3) 运行 split plan（Preset A）
-```bash
-curl -X POST http://localhost:8787/call \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tool":"rp_split_plan",
-    "args":{
-      "preset":"A",
-      "side":"buy",
-      "totalAmountIn":100,
-      "parts":4,
-      "maxSlippageBps":300
-    }
-  }' | jq .
-```
+## 🎬 Submission Assets
+- Canva Slides: `https://www.canva.com/design/TODO_REPLACE`
+- Demo Video: `https://youtu.be/TODO_REPLACE`
+- Loom Walkthrough: `https://www.loom.com/share/TODO_REPLACE`
 
-预期结果：
-- `/tools` 中能看到 `rp_quote` 和 `rp_split_plan`
-- `comparison.singleTradeImpactPct > comparison.splitAvgImpactPct`
-- `summary` 中能明确体现拆单建议
+### UI Screenshots
+- `demo/screenshots/web-console-main.png`
+- `demo/screenshots/mcp-call-result.png`
+- `demo/screenshots/terminal-curl.png`
 
-> 若本机未安装 `jq`，可去掉 `| jq .`，直接查看原始 JSON。
-
-## 📦 本地运行
-### Server
-```powershell
-cd server
-npm install
-npm run dev
-```
-
-### Web
-```powershell
-cd web
-npm install
-npm run dev
-```
-
-打开：`http://localhost:5173`
-
-## ☁️ 部署说明
-### Backend（Railway）
-必需环境变量：
-- `TRONGRID_BASE`
-- `TRONSCAN_BASE`
-- `CORS_ORIGIN`
-
-### Frontend（Vercel）
-必需环境变量：
-- `VITE_API_BASE_URL=https://<your-railway-domain>`
-
-## 🗂️ 提交材料清单（占位）
-- Canva Slides: TODO
-- Demo Video: TODO
-- Screenshots: TODO
-- Loom Walkthrough: TODO
-
-材料目录：
-- `demo/prompts.md`
-- `demo/screenshots/`
-
-## 📁 项目结构
+## 📁 Repo Structure
 ```text
 .
 ├─ README.md
-├─ .env.example
+├─ LICENSE
 ├─ server/
 ├─ web/
 ├─ docs/

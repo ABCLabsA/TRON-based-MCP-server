@@ -1,7 +1,7 @@
 ﻿import crypto from "node:crypto";
 import { fetchJson } from "./http.js";
 
-const BASE = process.env.TRONGRID_BASE || "https://api.trongrid.io";
+const BASE = process.env.TRONGRID_BASE || "https://nile.trongrid.io";
 const API_KEY = process.env.TRONGRID_API_KEY || "";
 const ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
 
@@ -95,6 +95,23 @@ export async function getTrc20Balance(address, contractAddress, options = {}) {
   });
 }
 
+
+export async function createTransferTransaction(from, to, amountSun, options = {}) {
+  const url = `${BASE}/wallet/createtransaction`;
+  const payload = {
+    owner_address: from,
+    to_address: to,
+    amount: Number(amountSun),
+    visible: true
+  };
+
+  return fetchJson(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...headers() },
+    body: JSON.stringify(payload),
+    ...options
+  });
+}
 export async function getAccountTransactions(address, options = {}) {
   const params = new URLSearchParams({
     limit: "20",
@@ -104,3 +121,5 @@ export async function getAccountTransactions(address, options = {}) {
   const url = `${BASE}/v1/accounts/${encodeURIComponent(address)}/transactions?${params.toString()}`;
   return fetchJson(url, { headers: headers(), ...options });
 }
+
+

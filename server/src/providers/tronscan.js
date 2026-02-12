@@ -1,6 +1,6 @@
 ﻿import { fetchJson } from "./http.js";
 
-const BASE = process.env.TRONSCAN_BASE || "https://apilist.tronscanapi.com/api";
+const BASE = process.env.TRONSCAN_BASE || "https://nileapi.tronscan.org";
 const API_KEY = process.env.TRONSCAN_API_KEY || "";
 
 function headers() {
@@ -29,3 +29,4 @@ export async function getTransactionInfo(txid, options = {}) {
   const url = `${BASE}/transaction-info?hash=${encodeURIComponent(txid)}`;
   return fetchJson(url, { headers: headers(), ...options });
 }
+
