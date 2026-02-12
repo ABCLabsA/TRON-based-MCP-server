@@ -1,11 +1,11 @@
-﻿# 🚀 RobinPump Trading Copilot · Server（MCP/HTTP）
+﻿# 🚀 RobinPump 服务端文档（MCP / HTTP）
 
 ## ✨ 服务能力
 - HTTP Bridge：`/health`、`/tools`、`/call`、`/mcp`
 - MCP stdio：可接入 Claude Desktop 等 MCP 客户端
-- 工具：TRON 查询 + `rp_quote` + `rp_split_plan`
+- 工具能力：TRON 查询 + `rp_quote` + `rp_split_plan`
 
-## ⚡ 启动
+## ⚡ 启动方式
 ```powershell
 cd server
 npm install
@@ -21,7 +21,7 @@ curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d '
 curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d '{"tool":"rp_split_plan","args":{"preset":"A","side":"buy","totalAmountIn":100,"parts":4,"maxSlippageBps":300}}' | jq .
 ```
 
-## 🧠 MCP stdio
+## 🧠 MCP stdio 模式
 ```powershell
 cd server
 npm run mcp:stdio
