@@ -1,4 +1,4 @@
-# RobinPump Trading Copilot (MCP + Web Console)
+﻿# RobinPump Trading Copilot (MCP + Web Console)
 
 Pre-trade quote + slippage + split-order plan for bonding-curve tokens to make trading on RobinPump.fun more efficient.
 
@@ -62,21 +62,54 @@ npm run dev
 Then run 3 verification calls:
 
 ```bash
-curl http://localhost:8787/tools
+curl -s http://localhost:8787/tools | jq .
 ```
 
 ```bash
 curl -X POST http://localhost:8787/call \
   -H "Content-Type: application/json" \
-  -d "{\"tool\":\"rp_quote\",\"args\":{\"preset\":\"A\",\"amountIn\":100,\"slippageBps\":100}}"
+  -d '{
+    "tool":"rp_quote",
+    "args":{
+      "preset":"A",
+      "side":"buy",
+      "amountIn":100
+    }
+  }' | jq .
 ```
 
 ```bash
 curl -X POST http://localhost:8787/call \
   -H "Content-Type: application/json" \
-  -d "{\"tool\":\"rp_split_plan\",\"args\":{\"preset\":\"A\",\"amountIn\":1000,\"parts\":4,\"slippageBps\":100}}"
+  -d '{
+    "tool":"rp_split_plan",
+    "args":{
+      "preset":"A",
+      "side":"buy",
+      "totalAmountIn":100,
+      "parts":4,
+      "maxSlippageBps":300
+    }
+  }' | jq .
 ```
 
+Expected output:
+
+- `/tools` response contains both `rp_quote` and `rp_split_plan`.
+- `rp_split_plan` response has `data.comparison.singleTradeImpactPct > data.comparison.splitAvgImpactPct`.
+- `summary` clearly indicates split recommendation (for example: split into N parts / split avg impact is lower).
+
+If `jq` is not installed, remove `| jq .` and read raw JSON directly.
+
+## Submission Checklist
+- Canva Slides: TODO
+- Demo Video: TODO
+- Screenshots: TODO
+- Loom Walkthrough: TODO
+
+Materials placeholder paths:
+- `demo/prompts.md`
+- `demo/screenshots/`
 ## Local Run
 
 ### Server
@@ -106,3 +139,4 @@ Open: `http://localhost:5173`
 ## Notes
 - Current RobinPump tools are designed as pre-trade simulation and planning layer.
 - Real contract-level pricing/execution hooks can be added without changing MCP protocol structure.
+
