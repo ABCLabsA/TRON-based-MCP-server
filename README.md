@@ -78,6 +78,7 @@ curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d '
 - Canva Slides：`https://www.canva.com/design/TODO_REPLACE`
 - Demo 视频：`https://youtu.be/TODO_REPLACE`
 - Loom 讲解视频：`https://www.loom.com/share/TODO_REPLACE`
+- 本地视频目录：`demo/videos/demo-video.mp4`、`demo/videos/loom-walkthrough.mp4`
 
 ### UI 截图路径
 
@@ -99,4 +100,6 @@ curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d '
 ├─ web/
 ├─ docs/
 └─ demo/
+   ├─ screenshots/
+   └─ videos/
 ```
