@@ -85,6 +85,10 @@ curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d '
 - `demo/screenshots/mcp-call-result.png`
 - `demo/screenshots/terminal-curl.png`
 
+![Web Console 主界面](demo/screenshots/web-console-main.png)
+![MCP 调用结果](demo/screenshots/mcp-call-result.png)
+![终端 curl 验证](demo/screenshots/terminal-curl.png)
+
 ## 📁 项目结构
 
 ```text
