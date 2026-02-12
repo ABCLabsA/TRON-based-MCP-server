@@ -2,26 +2,36 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import { getTransactionInfo } from "./providers/tronscan.js";
-import { getAccount, getAccountTransactions, getChainParameters, getNowBlock, getTrc20Balance, toHexAddress } from "./providers/trongrid.js";
-import { startMcpServer } from "./mcp.js";
+import {
+  createTransferTransaction,
+  getAccount,
+  getAccountTransactions,
+  getChainParameters,
+  getNowBlock,
+  getTrc20Balance,
+  toHexAddress,
+} from "./providers/trongrid.js";
 import { quoteBySide, splitPlan as buildSplitPlan } from "./robinpump/curve.js";
+import { startMcpServer } from "./mcp.js";
 
 const DEFAULT_HTTP_PORT = 8787;
 const PORT = Number(process.env.PORT || DEFAULT_HTTP_PORT);
 const MCP_HTTP_PORT = Number(process.env.MCP_HTTP_PORT || PORT);
 const USDT_CONTRACT = "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t";
 const SERVER_INFO = { name: "tron-mcp-server", version: "0.1.0" };
-
 const RP_PRESETS = {
-  A: { virtualBase: 120000, virtualToken: 6000000, feeBps: 30 },
-  B: { virtualBase: 200000, virtualToken: 4000000, feeBps: 50 }
+  A: { virtualBase: 100000, virtualToken: 500000, feeBps: 30 },
+  B: { virtualBase: 250000, virtualToken: 350000, feeBps: 50 },
 };
 
 function sendJson(res, status, body) {
   const data = JSON.stringify(body);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
-    "Content-Length": Buffer.byteLength(data)
+    "Content-Length": Buffer.byteLength(data),
+    "Access-Control-Allow-Origin": process.env.CORS_ORIGIN || "*",
+    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization"
   });
   res.end(data);
 }
@@ -31,10 +41,10 @@ function toMcpToolResult(body) {
     content: [
       {
         type: "text",
-        text: JSON.stringify(body, null, 2)
-      }
+        text: JSON.stringify(body, null, 2),
+      },
     ],
-    isError: body?.ok === false
+    isError: body?.ok === false,
   };
 }
 
@@ -42,7 +52,7 @@ function sendJsonRpcResult(res, id, result) {
   return sendJson(res, 200, {
     jsonrpc: "2.0",
     id: id ?? null,
-    result
+    result,
   });
 }
 
@@ -50,7 +60,7 @@ function sendJsonRpcError(res, id, code, message, data = null) {
   return sendJson(res, 200, {
     jsonrpc: "2.0",
     id: id ?? null,
-    error: { code, message, data }
+    error: { code, message, data },
   });
 }
 
@@ -73,7 +83,11 @@ const TOOLS = [
   {
     name: "get_network_status",
     description: "Get TRON network status.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false }
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
   },
   {
     name: "get_usdt_balance",
@@ -82,8 +96,8 @@ const TOOLS = [
       type: "object",
       properties: { address: { type: "string" } },
       required: ["address"],
-      additionalProperties: false
-    }
+      additionalProperties: false,
+    },
   },
   {
     name: "get_tx_status",
@@ -92,8 +106,8 @@ const TOOLS = [
       type: "object",
       properties: { txid: { type: "string" } },
       required: ["txid"],
-      additionalProperties: false
-    }
+      additionalProperties: false,
+    },
   },
   {
     name: "get_account_profile",
@@ -102,54 +116,39 @@ const TOOLS = [
       type: "object",
       properties: { address: { type: "string" } },
       required: ["address"],
-      additionalProperties: false
-    }
+      additionalProperties: false,
+    },
   },
   {
-    name: "verify_unsigned_tx",
-    description: "Verify an unsigned TRON transaction payload and derive txid from raw_data_hex.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        unsignedTx: { type: "object" },
-        rawDataHex: { type: "string" }
-      },
-      anyOf: [{ required: ["unsignedTx"] }, { required: ["rawDataHex"] }],
-      additionalProperties: false
-    }
-  }
-,
-  {
     name: "rp_quote",
-    description: "RobinPump bonding-curve quote preview for buy/sell.",
+    description: "Bonding-curve quote for buy/sell simulation.",
     inputSchema: {
       type: "object",
       properties: {
-        preset: { type: "string", enum: ["A", "B"] },
         side: { type: "string", enum: ["buy", "sell"] },
         amountIn: { type: "number", exclusiveMinimum: 0 },
         curve: {
           type: "object",
           properties: {
-            virtualBase: { type: "number", exclusiveMinimum: 0 },
-            virtualToken: { type: "number", exclusiveMinimum: 0 },
-            feeBps: { type: "integer", minimum: 0, maximum: 5000 }
+            virtualBase: { type: "number" },
+            virtualToken: { type: "number" },
+            feeBps: { type: "number" },
           },
           required: ["virtualBase", "virtualToken"],
-          additionalProperties: false
-        }
+          additionalProperties: false,
+        },
+        preset: { type: "string", enum: ["A", "B"] },
       },
       required: ["side", "amountIn"],
-      additionalProperties: false
-    }
+      additionalProperties: false,
+    },
   },
   {
     name: "rp_split_plan",
-    description: "RobinPump split-order planner under slippage budget.",
+    description: "Split-order planning for bonding-curve trades.",
     inputSchema: {
       type: "object",
       properties: {
-        preset: { type: "string", enum: ["A", "B"] },
         side: { type: "string", enum: ["buy", "sell"] },
         totalAmountIn: { type: "number", exclusiveMinimum: 0 },
         parts: { type: "integer", minimum: 2, maximum: 50 },
@@ -157,20 +156,57 @@ const TOOLS = [
         curve: {
           type: "object",
           properties: {
-            virtualBase: { type: "number", exclusiveMinimum: 0 },
-            virtualToken: { type: "number", exclusiveMinimum: 0 },
-            feeBps: { type: "integer", minimum: 0, maximum: 5000 }
+            virtualBase: { type: "number" },
+            virtualToken: { type: "number" },
+            feeBps: { type: "number" },
           },
           required: ["virtualBase", "virtualToken"],
-          additionalProperties: false
-        }
+          additionalProperties: false,
+        },
+        preset: { type: "string", enum: ["A", "B"] },
       },
       required: ["side", "totalAmountIn", "parts", "maxSlippageBps"],
-      additionalProperties: false
-    }
-  }];
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "verify_unsigned_tx",
+    description:
+      "Verify an unsigned TRON transaction payload and derive txid from raw_data_hex.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        unsignedTx: { type: "object" },
+        rawDataHex: { type: "string" },
+      },
+      anyOf: [{ required: ["unsignedTx"] }, { required: ["rawDataHex"] }],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "create_unsigned_transfer",
+    description: "Create an unsigned TRX transfer transaction (Nile).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        from: { type: "string" },
+        to: { type: "string" },
+        amountSun: { type: "number" },
+      },
+      required: ["from", "to", "amountSun"],
+      additionalProperties: false,
+    },
+  },
+];
 
-function jsonError(tool, code, message, extra = {}, source = "tronscan/trongrid", summaryZh = "") {
+function jsonError(
+  tool,
+  code,
+  message,
+  extra = {},
+  source = "tronscan/trongrid",
+  summaryZh = "",
+) {
   return {
     ok: false,
     tool,
@@ -180,8 +216,8 @@ function jsonError(tool, code, message, extra = {}, source = "tronscan/trongrid"
     meta: {
       ts: Date.now(),
       source,
-      requestId: crypto.randomUUID()
-    }
+      requestId: crypto.randomUUID(),
+    },
   };
 }
 
@@ -195,13 +231,18 @@ function jsonOk(tool, data, summaryZh, source = "tronscan/trongrid") {
     meta: {
       ts: Date.now(),
       source,
-      requestId: crypto.randomUUID()
-    }
+      requestId: crypto.randomUUID(),
+    },
   };
 }
 
 function isValidAddress(address) {
-  return typeof address === "string" && address.startsWith("T") && address.length >= 30 && address.length <= 40;
+  return (
+    typeof address === "string" &&
+    address.startsWith("T") &&
+    address.length >= 30 &&
+    address.length <= 40
+  );
 }
 
 function isValidTxid(txid) {
@@ -225,7 +266,7 @@ function normalizeAddressLike(addressLike) {
     try {
       return {
         base58: value,
-        hex: toHexAddress(value).toLowerCase()
+        hex: toHexAddress(value).toLowerCase(),
       };
     } catch {
       return null;
@@ -236,7 +277,7 @@ function normalizeAddressLike(addressLike) {
   if (/^[0-9a-fA-F]{42}$/.test(hex)) {
     return {
       base58: null,
-      hex: hex.toLowerCase()
+      hex: hex.toLowerCase(),
     };
   }
 
@@ -291,12 +332,20 @@ function extractTrc20Balance(payload) {
 
 function toStatus(info) {
   const confirmed = Boolean(info?.confirmed);
-  const contractRet = info?.contractRet || info?.contractResult || info?.finalResult || info?.final_result;
+  const contractRet =
+    info?.contractRet ||
+    info?.contractResult ||
+    info?.finalResult ||
+    info?.final_result;
   const revert = info?.revert || info?.reverted || false;
 
   if (!confirmed) return "PENDING";
   if (revert) return "FAILED";
-  if (typeof contractRet === "string" && contractRet.toUpperCase() === "SUCCESS") return "SUCCESS";
+  if (
+    typeof contractRet === "string" &&
+    contractRet.toUpperCase() === "SUCCESS"
+  )
+    return "SUCCESS";
   if (contractRet) return "FAILED";
   return "SUCCESS";
 }
@@ -313,23 +362,40 @@ function logUpstream(meta, bodySnippet) {
   if (process.env.NODE_ENV === "production") return;
   if (!meta) return;
   console.log(`[upstream] ${meta.url}`);
-  console.log(`[upstream] status=${meta.status} content-type=${meta.contentType}`);
-  if (meta.contentType && !meta.contentType.includes("application/json") && bodySnippet) {
+  console.log(
+    `[upstream] status=${meta.status} content-type=${meta.contentType}`,
+  );
+  if (
+    meta.contentType &&
+    !meta.contentType.includes("application/json") &&
+    bodySnippet
+  ) {
     console.log(`[upstream] body=${bodySnippet}`);
   }
 }
 
 function upstreamError(tool, err, source) {
-  return jsonError(tool, "UPSTREAM_ERROR", err.message || "upstream error", {
-    status: err.status ?? null,
-    contentType: err.contentType ?? null
-  }, source);
+  return jsonError(
+    tool,
+    "UPSTREAM_ERROR",
+    err.message || "upstream error",
+    {
+      status: err.status ?? null,
+      contentType: err.contentType ?? null,
+    },
+    source,
+  );
 }
 
 function parseAddressMeta(address) {
   try {
     if (typeof address !== "string") {
-      return { base58Valid: false, addressHex: null, network: "unknown", riskHint: "地址格式异常" };
+      return {
+        base58Valid: false,
+        addressHex: null,
+        network: "unknown",
+        riskHint: "地址格式异常",
+      };
     }
 
     const addressHex = toHexAddress(address).toLowerCase();
@@ -341,10 +407,15 @@ function parseAddressMeta(address) {
       base58Valid: true,
       addressHex,
       network,
-      riskHint: network === "TRON" ? "未发现明显风险" : "地址网络前缀异常"
+      riskHint: network === "TRON" ? "未发现明显风险" : "地址网络前缀异常",
     };
   } catch (err) {
-    return { base58Valid: false, addressHex: null, network: "unknown", riskHint: "地址 Base58 校验失败" };
+    return {
+      base58Valid: false,
+      addressHex: null,
+      network: "unknown",
+      riskHint: "地址 Base58 校验失败",
+    };
   }
 }
 
@@ -366,10 +437,14 @@ function summarizeTxs(list, address) {
 
     const ownerNormalized = normalizeAddressLike(owner);
     const toNormalized = normalizeAddressLike(to);
-    const ownerMatch = ownerNormalized
-      && ((targetBase58 && ownerNormalized.base58 === targetBase58) || (targetHex && ownerNormalized.hex === targetHex));
-    const toMatch = toNormalized
-      && ((targetBase58 && toNormalized.base58 === targetBase58) || (targetHex && toNormalized.hex === targetHex));
+    const ownerMatch =
+      ownerNormalized &&
+      ((targetBase58 && ownerNormalized.base58 === targetBase58) ||
+        (targetHex && ownerNormalized.hex === targetHex));
+    const toMatch =
+      toNormalized &&
+      ((targetBase58 && toNormalized.base58 === targetBase58) ||
+        (targetHex && toNormalized.hex === targetHex));
 
     if (ownerMatch) outbound += 1;
     if (toMatch) inbound += 1;
@@ -379,35 +454,35 @@ function summarizeTxs(list, address) {
 }
 
 function resolveCurveInput(curve, preset) {
-  if (curve && typeof curve === "object") {
+  if (curve && typeof curve === "object") return curve;
+  if (typeof preset === "string" && RP_PRESETS[preset]) return RP_PRESETS[preset];
+  return null;
+}
+
+async function handleToolCall(tool, args) {
+  if (typeof tool !== "string") {
     return {
-      virtualBase: Number(curve.virtualBase),
-      virtualToken: Number(curve.virtualToken),
-      feeBps: curve.feeBps === undefined ? 0 : Number(curve.feeBps)
+      status: 400,
+      body: jsonError(
+        tool ?? "unknown",
+        "INVALID_REQUEST",
+        "tool must be a string",
+      ),
     };
   }
 
-  const key = typeof preset === "string" && preset ? preset.toUpperCase() : "A";
-  const picked = RP_PRESETS[key];
-  if (!picked) {
-    throw new Error(`Unknown preset '${preset}'. Use A or B.`);
-  }
-  return picked;
-}
-async function handleToolCall(tool, args) {
-  if (typeof tool !== "string") {
-    return { status: 400, body: jsonError(tool ?? "unknown", "INVALID_REQUEST", "tool must be a string") };
-  }
-
   if (!TOOLS.find((t) => t.name === tool)) {
-    return { status: 404, body: jsonError(tool, "TOOL_NOT_FOUND", "tool not found") };
+    return {
+      status: 404,
+      body: jsonError(tool, "TOOL_NOT_FOUND", "tool not found"),
+    };
   }
 
   if (tool === "get_network_status") {
     try {
       const [block, params] = await Promise.all([
         getNowBlock(),
-        getChainParameters()
+        getChainParameters(),
       ]);
       const number = block?.block_header?.raw_data?.number ?? null;
       const timestamp = block?.block_header?.raw_data?.timestamp ?? null;
@@ -418,7 +493,7 @@ async function handleToolCall(tool, args) {
       const gas = {
         energyFee,
         transactionFee,
-        bandwidthPrice
+        bandwidthPrice,
       };
       return {
         status: 200,
@@ -427,11 +502,11 @@ async function handleToolCall(tool, args) {
           {
             latestBlock: { number, timestamp },
             gas,
-            health: "ok"
+            health: "ok",
           },
           "网络正常（已获取 Gas 参数）",
-          "trongrid"
-        )
+          "trongrid",
+        ),
       };
     } catch (err) {
       return { status: 502, body: upstreamError(tool, err, "trongrid") };
@@ -441,13 +516,20 @@ async function handleToolCall(tool, args) {
   if (tool === "get_usdt_balance") {
     const { address } = args ?? {};
     if (!isValidAddress(address)) {
-      return { status: 400, body: jsonError(tool, "INVALID_ADDRESS", "address must start with T and length 30-40") };
+      return {
+        status: 400,
+        body: jsonError(
+          tool,
+          "INVALID_ADDRESS",
+          "address must start with T and length 30-40",
+        ),
+      };
     }
 
     try {
       const [acctRes, usdtRes] = await Promise.all([
         getAccount(address, { includeMeta: true }),
-        getTrc20Balance(address, USDT_CONTRACT, { includeMeta: true })
+        getTrc20Balance(address, USDT_CONTRACT, { includeMeta: true }),
       ]);
 
       logUpstream(acctRes.meta);
@@ -475,16 +557,19 @@ async function handleToolCall(tool, args) {
               balance: usdtBalance,
               balanceRaw: String(usdtRaw ?? "0"),
               decimals: usdtDecimals,
-              contract: USDT_CONTRACT
+              contract: USDT_CONTRACT,
             },
-            addressMeta
+            addressMeta,
           },
           summary,
-          "trongrid"
-        )
+          "trongrid",
+        ),
       };
     } catch (err) {
-      logUpstream({ url: err.url, status: err.status, contentType: err.contentType }, err.bodySnippet);
+      logUpstream(
+        { url: err.url, status: err.status, contentType: err.contentType },
+        err.bodySnippet,
+      );
       return { status: 502, body: upstreamError(tool, err, "trongrid") };
     }
   }
@@ -492,7 +577,10 @@ async function handleToolCall(tool, args) {
   if (tool === "get_tx_status") {
     const { txid } = args ?? {};
     if (!isValidTxid(txid)) {
-      return { status: 400, body: jsonError(tool, "INVALID_TXID", "txid must be 64 hex chars") };
+      return {
+        status: 400,
+        body: jsonError(tool, "INVALID_TXID", "txid must be 64 hex chars"),
+      };
     }
 
     try {
@@ -501,11 +589,17 @@ async function handleToolCall(tool, args) {
       const block = info?.block ?? info?.blockNumber ?? null;
       const timestamp = info?.timestamp ?? info?.block_timestamp ?? null;
       const timeText = timestamp ? new Date(timestamp).toISOString() : "";
-      const summary = status === "PENDING" ? "交易未确认" : `交易已确认，时间 ${timeText}`;
+      const summary =
+        status === "PENDING" ? "交易未确认" : `交易已确认，时间 ${timeText}`;
 
       return {
         status: 200,
-        body: jsonOk(tool, { txid, status, block, timestamp }, summary, "tronscan")
+        body: jsonOk(
+          tool,
+          { txid, status, block, timestamp },
+          summary,
+          "tronscan",
+        ),
       };
     } catch (err) {
       return { status: 502, body: upstreamError(tool, err, "tronscan") };
@@ -513,111 +607,139 @@ async function handleToolCall(tool, args) {
   }
 
   if (tool === "rp_quote") {
-    try {
-      const side = args?.side;
-      const amountIn = Number(args?.amountIn);
-      if (side !== "buy" && side !== "sell") {
-        return { status: 400, body: jsonError(tool, "INVALID_PARAMS", "side must be buy or sell") };
-      }
-      if (!Number.isFinite(amountIn) || amountIn <= 0) {
-        return { status: 400, body: jsonError(tool, "INVALID_PARAMS", "amountIn must be > 0") };
-      }
-
-      const curve = resolveCurveInput(args?.curve, args?.preset);
-      const quote = quoteBySide(curve, side, amountIn);
-      const keyFacts = {
-        amountIn: quote.amountIn,
-        amountOut: quote.amountOut,
-        avgPrice: quote.avgPrice,
-        spotPriceBefore: quote.spotPriceBefore,
-        spotPriceAfter: quote.spotPriceAfter,
-        priceImpactPct: quote.priceImpactPct
+    const { side, amountIn, curve, preset } = args ?? {};
+    const curveInput = resolveCurveInput(curve, preset);
+    if (!curveInput) {
+      return {
+        status: 400,
+        body: jsonError(
+          tool,
+          "INVALID_CURVE",
+          "Provide curve or preset(A/B)",
+        ),
       };
-
-      const summary = `${side.toUpperCase()} quote: in ${quote.amountIn}, out ${quote.amountOut}, impact ${quote.priceImpactPct}%`;
+    }
+    try {
+      const q = quoteBySide(curveInput, side, amountIn);
+      const summary = `Quote ${side}: in ${q.amountIn.toFixed(6)}, out ${q.amountOut.toFixed(6)}, impact ${q.priceImpactPct.toFixed(4)}%`;
       return {
         status: 200,
-        body: jsonOk(tool, {
+        body: jsonOk(
+          tool,
+          {
+            summary,
+            key_facts: {
+              amountIn: q.amountIn,
+              amountOut: q.amountOut,
+              avgPrice: q.avgPrice,
+              spotPriceBefore: q.spotPriceBefore,
+              spotPriceAfter: q.spotPriceAfter,
+              priceImpactPct: q.priceImpactPct,
+            },
+            next_steps: ["Call rp_split_plan to compare single vs split."],
+            raw: q,
+          },
           summary,
-          key_facts: keyFacts,
-          next_steps: ["Run rp_split_plan to compare single vs split execution."],
-          raw: { side, preset: args?.preset ?? "A", curve, quote }
-        }, summary, "robinpump-sim")
+          "local-robinpump",
+        ),
       };
     } catch (err) {
-      return { status: 400, body: jsonError(tool, "INVALID_PARAMS", err.message || "invalid params") };
+      return {
+        status: 400,
+        body: jsonError(tool, "INVALID_INPUT", err.message || "invalid input"),
+      };
     }
   }
 
   if (tool === "rp_split_plan") {
-    try {
-      const side = args?.side;
-      const totalAmountIn = Number(args?.totalAmountIn);
-      const parts = Number(args?.parts);
-      const maxSlippageBps = Number(args?.maxSlippageBps);
-
-      if (side !== "buy" && side !== "sell") {
-        return { status: 400, body: jsonError(tool, "INVALID_PARAMS", "side must be buy or sell") };
-      }
-      if (!Number.isFinite(totalAmountIn) || totalAmountIn <= 0) {
-        return { status: 400, body: jsonError(tool, "INVALID_PARAMS", "totalAmountIn must be > 0") };
-      }
-      if (!Number.isInteger(parts) || parts < 2 || parts > 50) {
-        return { status: 400, body: jsonError(tool, "INVALID_PARAMS", "parts must be integer in [2, 50]") };
-      }
-      if (!Number.isInteger(maxSlippageBps) || maxSlippageBps < 0 || maxSlippageBps > 5000) {
-        return { status: 400, body: jsonError(tool, "INVALID_PARAMS", "maxSlippageBps must be integer in [0, 5000]") };
-      }
-
-      const curve = resolveCurveInput(args?.curve, args?.preset);
-      const planned = buildSplitPlan(curve, side, totalAmountIn, parts);
-      const singleTradeImpactPct = planned.single.priceImpactPct;
-      const splitAvgImpactPct = planned.splitAvgImpactPct;
-      const comparison = {
-        singleTradeImpactPct,
-        splitAvgImpactPct,
-        splitTotalOut: planned.splitTotalOut,
-        singleTotalOut: planned.single.amountOut
+    const { side, totalAmountIn, parts, maxSlippageBps, curve, preset } = args ?? {};
+    const curveInput = resolveCurveInput(curve, preset);
+    if (!curveInput) {
+      return {
+        status: 400,
+        body: jsonError(
+          tool,
+          "INVALID_CURVE",
+          "Provide curve or preset(A/B)",
+        ),
       };
-
-      const splitAvgImpactBps = splitAvgImpactPct * 100;
-      const nextSteps = [];
-      if (splitAvgImpactBps > maxSlippageBps) {
-        nextSteps.push("Split plan exceeds slippage budget; increase parts or reduce total amount.");
-      } else {
-        nextSteps.push("Split plan is within slippage budget.");
-      }
-      nextSteps.push("Use rp_quote for fine-grained per-order previews.");
-
-      const summary = `Split ${parts} parts: single impact ${singleTradeImpactPct}% vs split avg ${splitAvgImpactPct}%`;
+    }
+    try {
+      const planResult = buildSplitPlan(curveInput, side, totalAmountIn, parts);
+      const maxImpactPct = Number(maxSlippageBps) / 100;
+      const maxTrancheImpact = Math.max(
+        ...planResult.plan.map((x) => Math.abs(x.expectedImpactPct)),
+      );
+      const summary = `Split ${parts}: singleImpact=${planResult.single.priceImpactPct.toFixed(4)}%, splitAvgImpact=${planResult.splitAvgImpactPct.toFixed(4)}%`;
       return {
         status: 200,
-        body: jsonOk(tool, {
+        body: jsonOk(
+          tool,
+          {
+            summary,
+            plan: planResult.plan,
+            comparison: {
+              singleTradeImpactPct: planResult.single.priceImpactPct,
+              splitAvgImpactPct: planResult.splitAvgImpactPct,
+              splitTotalOut: planResult.splitTotalOut,
+              singleTotalOut: planResult.single.amountOut,
+            },
+            next_steps: maxTrancheImpact > maxImpactPct
+              ? [
+                  "Current split exceeds maxSlippageBps; increase parts or reduce totalAmountIn.",
+                ]
+              : ["Plan is within maxSlippageBps threshold."],
+          },
           summary,
-          plan: planned.plan,
-          comparison,
-          next_steps: nextSteps
-        }, summary, "robinpump-sim")
+          "local-robinpump",
+        ),
       };
     } catch (err) {
-      return { status: 400, body: jsonError(tool, "INVALID_PARAMS", err.message || "invalid params") };
+      return {
+        status: 400,
+        body: jsonError(tool, "INVALID_INPUT", err.message || "invalid input"),
+      };
     }
   }
+
   if (tool === "verify_unsigned_tx") {
     const unsignedTx = args?.unsignedTx;
     const argRawDataHex = args?.rawDataHex;
-    if (unsignedTx !== undefined && (typeof unsignedTx !== "object" || unsignedTx === null || Array.isArray(unsignedTx))) {
-      return { status: 400, body: jsonError(tool, "INVALID_UNSIGNED_TX", "unsignedTx must be an object") };
+    if (
+      unsignedTx !== undefined &&
+      (typeof unsignedTx !== "object" ||
+        unsignedTx === null ||
+        Array.isArray(unsignedTx))
+    ) {
+      return {
+        status: 400,
+        body: jsonError(
+          tool,
+          "INVALID_UNSIGNED_TX",
+          "unsignedTx must be an object",
+        ),
+      };
     }
     if (argRawDataHex !== undefined && typeof argRawDataHex !== "string") {
-      return { status: 400, body: jsonError(tool, "INVALID_RAW_DATA_HEX", "rawDataHex must be a string") };
+      return {
+        status: 400,
+        body: jsonError(
+          tool,
+          "INVALID_RAW_DATA_HEX",
+          "rawDataHex must be a string",
+        ),
+      };
     }
 
     const rawDataHexInput = argRawDataHex ?? unsignedTx?.raw_data_hex;
     if (typeof rawDataHexInput !== "string") {
       return {
         status: 400,
-        body: jsonError(tool, "MISSING_RAW_DATA_HEX", "Provide rawDataHex or unsignedTx.raw_data_hex")
+        body: jsonError(
+          tool,
+          "MISSING_RAW_DATA_HEX",
+          "Provide rawDataHex or unsignedTx.raw_data_hex",
+        ),
       };
     }
 
@@ -625,12 +747,18 @@ async function handleToolCall(tool, args) {
     if (!rawDataHex) {
       return {
         status: 400,
-        body: jsonError(tool, "INVALID_RAW_DATA_HEX", "rawDataHex must be even-length hex string")
+        body: jsonError(
+          tool,
+          "INVALID_RAW_DATA_HEX",
+          "rawDataHex must be even-length hex string",
+        ),
       };
     }
 
     const txid = deriveTxidFromRawDataHex(rawDataHex);
-    const signatures = Array.isArray(unsignedTx?.signature) ? unsignedTx.signature : [];
+    const signatures = Array.isArray(unsignedTx?.signature)
+      ? unsignedTx.signature
+      : [];
     const hasSignature = signatures.length > 0;
     const contract = unsignedTx?.raw_data?.contract?.[0];
     const contractType = contract?.type ?? null;
@@ -640,23 +768,27 @@ async function handleToolCall(tool, args) {
     const ownerNorm = ownerAddress ? normalizeAddressLike(ownerAddress) : null;
     const toNorm = toAddress ? normalizeAddressLike(toAddress) : null;
     const amountSun = value.amount ?? null;
-    const expiration = Number.isFinite(unsignedTx?.raw_data?.expiration) ? unsignedTx.raw_data.expiration : null;
+    const expiration = Number.isFinite(unsignedTx?.raw_data?.expiration)
+      ? unsignedTx.raw_data.expiration
+      : null;
     const now = Date.now();
     const expired = expiration !== null ? expiration <= now : null;
 
     const warnings = [];
-    if (hasSignature) warnings.push("交易对象包含 signature 字段，不是未签名交易");
+    if (hasSignature)
+      warnings.push("交易对象包含 signature 字段，不是未签名交易");
     if (ownerAddress && !ownerNorm) warnings.push("owner_address 格式无效");
     if (toAddress && !toNorm) warnings.push("to_address 格式无效");
-    if (amountSun !== null && Number(amountSun) < 0) warnings.push("amount 不能小于 0");
+    if (amountSun !== null && Number(amountSun) < 0)
+      warnings.push("amount 不能小于 0");
     if (expired === true) warnings.push("交易已过期");
 
     const valid =
-      !hasSignature
-      && (ownerAddress ? Boolean(ownerNorm) : true)
-      && (toAddress ? Boolean(toNorm) : true)
-      && (expired !== true)
-      && Boolean(txid);
+      !hasSignature &&
+      (ownerAddress ? Boolean(ownerNorm) : true) &&
+      (toAddress ? Boolean(toNorm) : true) &&
+      expired !== true &&
+      Boolean(txid);
 
     const summary = valid
       ? "未签名交易校验通过，可用于后续签名流程"
@@ -677,28 +809,97 @@ async function handleToolCall(tool, args) {
           toAddress,
           toAddressValid: toAddress ? Boolean(toNorm) : null,
           amountSun: amountSun !== null ? String(amountSun) : null,
-          amountTrx: amountSun !== null ? formatTokenAmount(String(amountSun), 6) : null,
+          amountTrx:
+            amountSun !== null ? formatTokenAmount(String(amountSun), 6) : null,
           expiration,
           expired,
-          warnings
+          warnings,
         },
         summary,
-        "local-validation"
-      )
+        "local-validation",
+      ),
     };
+  }
+
+  if (tool === "create_unsigned_transfer") {
+    const { from, to, amountSun } = args ?? {};
+    if (!isValidAddress(from) || !isValidAddress(to)) {
+      return {
+        status: 400,
+        body: jsonError(
+          tool,
+          "INVALID_ADDRESS",
+          "from/to must be valid TRON addresses",
+        ),
+      };
+    }
+    const amount = Number(amountSun);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return {
+        status: 400,
+        body: jsonError(
+          tool,
+          "INVALID_AMOUNT",
+          "amountSun must be a positive number",
+        ),
+      };
+    }
+
+    try {
+      const tx = await createTransferTransaction(from, to, amount, {
+        includeMeta: true,
+      });
+      logUpstream(tx.meta);
+      const errMsg = tx?.data?.Error || tx?.data?.error || null;
+      if (errMsg) {
+        return {
+          status: 400,
+          body: jsonError(
+            tool,
+            "UPSTREAM_VALIDATE_ERROR",
+            String(errMsg),
+            {},
+            "trongrid",
+            "创建未签名交易失败（上游校验错误）",
+          ),
+        };
+      }
+      return {
+        status: 200,
+        body: jsonOk(
+          tool,
+          { transaction: tx.data },
+          "已生成未签名交易对象",
+          "trongrid",
+        ),
+      };
+    } catch (err) {
+      logUpstream(
+        { url: err.url, status: err.status, contentType: err.contentType },
+        err.bodySnippet,
+      );
+      return { status: 502, body: upstreamError(tool, err, "trongrid") };
+    }
   }
 
   if (tool === "get_account_profile") {
     const { address } = args ?? {};
     if (!isValidAddress(address)) {
-      return { status: 400, body: jsonError(tool, "INVALID_ADDRESS", "address must start with T and length 30-40") };
+      return {
+        status: 400,
+        body: jsonError(
+          tool,
+          "INVALID_ADDRESS",
+          "address must start with T and length 30-40",
+        ),
+      };
     }
 
     try {
       const [acctRes, usdtRes, txRes] = await Promise.all([
         getAccount(address, { includeMeta: true }),
         getTrc20Balance(address, USDT_CONTRACT, { includeMeta: true }),
-        getAccountTransactions(address, { includeMeta: true })
+        getAccountTransactions(address, { includeMeta: true }),
       ]);
 
       logUpstream(acctRes.meta);
@@ -717,7 +918,9 @@ async function handleToolCall(tool, args) {
 
       const txList = Array.isArray(txRes?.data?.data) ? txRes.data.data : [];
       const summaryTx = summarizeTxs(txList, address);
-      const lastTime = summaryTx.lastTimestamp ? new Date(summaryTx.lastTimestamp).toISOString() : null;
+      const lastTime = summaryTx.lastTimestamp
+        ? new Date(summaryTx.lastTimestamp).toISOString()
+        : null;
 
       const summary = `近 ${summaryTx.total} 笔交易，入账 ${summaryTx.inbound}，出账 ${summaryTx.outbound}，最近一笔 ${lastTime || "未知"}`;
       return {
@@ -731,7 +934,7 @@ async function handleToolCall(tool, args) {
               balance: usdtBalance,
               balanceRaw: String(usdtRaw ?? "0"),
               decimals: usdtDecimals,
-              contract: USDT_CONTRACT
+              contract: USDT_CONTRACT,
             },
             addressMeta,
             activity: {
@@ -739,25 +942,40 @@ async function handleToolCall(tool, args) {
               inbound: summaryTx.inbound,
               outbound: summaryTx.outbound,
               lastTimestamp: summaryTx.lastTimestamp,
-              lastIso: lastTime
-            }
+              lastIso: lastTime,
+            },
           },
           summary,
-          "trongrid"
-        )
+          "trongrid",
+        ),
       };
     } catch (err) {
-      logUpstream({ url: err.url, status: err.status, contentType: err.contentType }, err.bodySnippet);
+      logUpstream(
+        { url: err.url, status: err.status, contentType: err.contentType },
+        err.bodySnippet,
+      );
       return { status: 502, body: upstreamError(tool, err, "trongrid") };
     }
   }
 
-  return { status: 400, body: jsonError(tool, "INVALID_REQUEST", "unsupported tool") };
+  return {
+    status: 400,
+    body: jsonError(tool, "INVALID_REQUEST", "unsupported tool"),
+  };
 }
 
 function startHttpServer() {
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, {
+        "Access-Control-Allow-Origin": process.env.CORS_ORIGIN || "*",
+        "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+      });
+      res.end();
+      return;
+    }
 
     if (req.method === "GET" && url.pathname === "/health") {
       return sendJson(res, 200, { ok: true });
@@ -776,7 +994,11 @@ function startHttpServer() {
         const result = await handleToolCall(tool, args);
         return sendJson(res, result.status, result.body);
       } catch (err) {
-        return sendJson(res, 400, jsonError("unknown", "BAD_JSON", "invalid JSON body"));
+        return sendJson(
+          res,
+          400,
+          jsonError("unknown", "BAD_JSON", "invalid JSON body"),
+        );
       }
     }
 
@@ -804,8 +1026,8 @@ function startHttpServer() {
             protocolVersion: "2024-11-05",
             serverInfo: SERVER_INFO,
             capabilities: {
-              tools: { listChanged: false }
-            }
+              tools: { listChanged: false },
+            },
           });
         }
 
@@ -826,7 +1048,9 @@ function startHttpServer() {
           const name = msg?.params?.name;
           const args = msg?.params?.arguments ?? {};
           if (typeof name !== "string" || !name) {
-            return sendJsonRpcError(res, msg.id, -32602, "Invalid params", { reason: "name is required" });
+            return sendJsonRpcError(res, msg.id, -32602, "Invalid params", {
+              reason: "name is required",
+            });
           }
           const result = await handleToolCall(name, args);
           return sendJsonRpcResult(res, msg.id, toMcpToolResult(result.body));
@@ -841,9 +1065,13 @@ function startHttpServer() {
           return sendJsonRpcResult(res, msg.id, {});
         }
 
-        return sendJsonRpcError(res, msg.id, -32601, "Method not found", { method: msg.method ?? null });
+        return sendJsonRpcError(res, msg.id, -32601, "Method not found", {
+          method: msg.method ?? null,
+        });
       } catch (err) {
-        return sendJsonRpcError(res, msg?.id, -32603, "Internal error", { message: err?.message || "Unknown" });
+        return sendJsonRpcError(res, msg?.id, -32603, "Internal error", {
+          message: err?.message || "Unknown",
+        });
       }
     }
 
@@ -852,7 +1080,9 @@ function startHttpServer() {
   });
 
   server.listen(MCP_HTTP_PORT, () => {
-    console.log(`MCP Server + HTTP bridge listening on http://localhost:${MCP_HTTP_PORT}`);
+    console.log(
+      `MCP Server + HTTP bridge listening on http://localhost:${MCP_HTTP_PORT}`,
+    );
   });
 }
 
@@ -865,7 +1095,7 @@ if (useStdio) {
       const result = await handleToolCall(name, args);
       return result.body;
     },
-    serverInfo: SERVER_INFO
+    serverInfo: SERVER_INFO,
   }).catch((err) => {
     console.error("MCP stdio error", err);
     process.exit(1);
@@ -873,6 +1103,3 @@ if (useStdio) {
 } else {
   startHttpServer();
 }
-
-
-
