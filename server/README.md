@@ -1,123 +1,126 @@
-﻿### TRON MCP Server
+﻿# 🚀 RobinPump Trading Copilot · Server（MCP/HTTP）
 
-## HTTP Mode (default)
-Start the HTTP bridge on `PORT` (default 8787):
-```
-cd tron-mcp-poc\server
+⭐ 本文档是服务端运行与验证手册，风格与根目录 `README.md` 保持一致。
+
+## ✨ 服务端能力
+- 提供 HTTP Bridge：`/health`、`/tools`、`/call`、`/mcp`
+- 提供 MCP stdio 模式（可接入 Claude Desktop / 其他 MCP 客户端）
+- 支持 RobinPump Copilot 工具：`rp_quote`、`rp_split_plan`
+- 支持原有 TRON 查询与交易辅助工具
+
+## 📦 快速启动（HTTP 模式）
+```powershell
+cd server
 npm install
 npm run dev
 ```
 
-Verify:
-```
-curl http://localhost:8787/health
-curl http://localhost:8787/tools
+默认端口：`8787`
+
+验证：
+```bash
+curl -s http://localhost:8787/health
+curl -s http://localhost:8787/tools | jq .
 ```
 
-You can change the port with:
-```
+自定义端口（Windows）：
+```powershell
 set PORT=8790
 npm run dev
 ```
 
-## MCP stdio Mode (Claude Desktop)
-Run MCP stdio only (no HTTP listener):
-```
-cd tron-mcp-poc\server
+## 🧠 MCP stdio 模式
+仅启动 MCP stdio（不启 HTTP 监听）：
+```powershell
+cd server
 npm run mcp:stdio
 ```
 
-If you still want HTTP in stdio mode, set a different port:
-```
+如果需要在 stdio 模式下同时暴露 HTTP 端口：
+```powershell
 set MCP_HTTP_PORT=8790
 npm run mcp:stdio
 ```
 
-## MCP Step5 Smoke Test
-Run the stdio MCP smoke test (starts stdio server as a child process):
+## ⚡ Quick Verification（Judge / Dev）
+### 1) 工具列表
+```bash
+curl -s http://localhost:8787/tools | jq .
 ```
-cd tron-mcp-poc\server
+
+### 2) `rp_quote`（Preset A）
+```bash
+curl -X POST http://localhost:8787/call \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tool":"rp_quote",
+    "args":{
+      "preset":"A",
+      "side":"buy",
+      "amountIn":100
+    }
+  }' | jq .
+```
+
+### 3) `rp_split_plan`（Preset A）
+```bash
+curl -X POST http://localhost:8787/call \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tool":"rp_split_plan",
+    "args":{
+      "preset":"A",
+      "side":"buy",
+      "totalAmountIn":100,
+      "parts":4,
+      "maxSlippageBps":300
+    }
+  }' | jq .
+```
+
+预期结果：
+- `tools` 中能看到 `rp_quote`、`rp_split_plan`
+- `singleTradeImpactPct > splitAvgImpactPct`
+- `summary` 有明确拆单建议
+
+## 🧪 MCP 测试脚本
+stdio 冒烟测试：
+```powershell
+cd server
 npm run mcp:test
 ```
 
-Expected output (example):
-```
-Tools: get_network_status, get_usdt_balance, get_tx_status, get_account_profile, verify_unsigned_tx, create_unsigned_transfer
-get_network_status:
-{ ... ok: true ... }
-get_usdt_balance:
-{ ... ok: true ... }
-get_tx_status:
-{ ... ok: true or ok: false for invalid txid ... }
-get_account_profile:
-{ ... ok: true, includes activity summary ... }
-verify_unsigned_tx:
-{ ... ok: true, includes valid/txid/warnings ... }
-create_unsigned_transfer:
-{ ... ok: true, includes raw_data/raw_data_hex ... }
-```
-
-## MCP HTTP Smoke Test
-Run the HTTP MCP smoke test (assumes server is running on port 8787):
-```
-cd tron-mcp-poc\server
+HTTP MCP 冒烟测试：
+```powershell
+cd server
 npm run mcp:http-test
 ```
 
-### Claude Desktop setup
-1) Use `server/mcp.json` as a template.
-2) Update the script path to your local `tron-mcp-poc\server\src\index.js`.
-3) Optionally add `TRONGRID_API_KEY` in the `env` block for higher quota.
-4) Paste the `mcpServers` block into Claude Desktop config.
+## 🔌 Claude Desktop 接入（可选）
+1. 以 `server/mcp.json` 为模板。
+2. 将脚本路径指向本地 `server/src/index.js`。
+3. 如需更高配额，可在 `env` 增加 `TRONGRID_API_KEY`。
+4. 将 `mcpServers` 段落粘贴到 Claude Desktop 配置文件。
 
-Config location (Windows):
-```
+Windows 配置文件位置：
+```text
 %APPDATA%\Claude\claude_desktop_config.json
 ```
 
-Restart Claude Desktop. The tools should appear as:
-- `get_network_status`
-- `get_usdt_balance`
-- `get_tx_status`
-- `get_account_profile`
-- `verify_unsigned_tx`
-- `create_unsigned_transfer`
+## ☁️ 环境变量
+常用变量：
+- `PORT`
+- `MCP_HTTP_PORT`
+- `TRONGRID_BASE`
+- `TRONSCAN_BASE`
+- `TRONGRID_API_KEY`（可选）
 
-## API Keys (optional on Nile testnet)
-- `TRONGRID_API_KEY`: optional on Nile, recommended for better quota stability.
+Nile 测试网建议：
+- `TRONGRID_BASE=https://nile.trongrid.io`
+- `TRONSCAN_BASE=https://nileapi.tronscan.org`
 
-Set it in `server/.env` (see `server/.env.example`).
-
-## Upstream APIs
-- TRONGRID: `https://api.trongrid.io`
-- TRONSCAN: `https://apilist.tronscanapi.com/api`
-
-## Windows CMD curl examples
-
-### Call tool: get_network_status
-```
-curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d "{\"tool\":\"get_network_status\",\"args\":{}}"
-```
-
-### Call tool: get_usdt_balance
-```
-curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d "{\"tool\":\"get_usdt_balance\",\"args\":{\"address\":\"TQ9d1eZkS4s2a9x1YQ9d1eZkS4s2a9x1YQ\"}}"
-```
-
-### Call tool: get_tx_status
-```
-curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d "{\"tool\":\"get_tx_status\",\"args\":{\"txid\":\"a3b7f0b8c1f5e9d3a3b7f0b8c1f5e9d3a3b7f0b8c1f5e9d3a3b7f0b8c1f5e9d3\"}}"
-```
-
-### Call tool: get_account_profile
-```
-curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d "{\"tool\":\"get_account_profile\",\"args\":{\"address\":\"TQ9d1eZkS4s2a9x1YQ9d1eZkS4s2a9x1YQ\"}}"
-```
-
-### Call tool: verify_unsigned_tx
-```
-curl -X POST http://localhost:8787/call -H "Content-Type: application/json" -d "{\"tool\":\"verify_unsigned_tx\",\"args\":{\"rawDataHex\":\"0a02cafe\"}}"
-```
-
-## HTTP client file
-See `scripts/test.http` for ready-to-run requests.
+## 📁 相关文件
+- `server/src/index.js`：工具注册与调用入口
+- `server/src/robinpump/curve.js`：bonding curve 计算模块
+- `server/scripts/mcp-smoke-test.js`：stdio 测试脚本
+- `server/scripts/http-mcp-smoke-test.js`：HTTP MCP 测试脚本

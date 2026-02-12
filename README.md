@@ -1,52 +1,57 @@
-﻿# 🚀 RobinPump Trading Copilot (MCP + Web Console)
+﻿# 🚀 RobinPump Trading Copilot（MCP + Web Console）
 
-⭐ Pre-trade `quote` + slippage-aware `split plan` for bonding-curve tokens, with MCP tools and one-click Web Console demo.
+⭐ 面向 RobinPump.fun 的交易前辅助系统：提供 `quote` 预演、滑点评估与拆单计划（split plan），帮助用户更高效执行交易。
 
-## ✨ Why This Project
-RobinPump trading often suffers from large one-shot slippage and unclear execution plans.
-This project upgrades a TRON MCP server into a **DeFi Track trading copilot** that helps users decide **before** sending transactions.
+## ✨ 项目定位
+RobinPump 等 bonding curve 场景里，单笔大额交易常见问题是：
+- 滑点过大
+- 执行效率低
+- 缺少下单前可解释的预演与建议
 
-## 🧩 Core Modules
-### 1) Multi-dimensional Data Access (TRON)
+本项目在现有 TRON MCP Server 基础上做最小改造，升级为 **DeFi Track Trading Copilot**。
+
+## 🧩 核心功能模块
+### 1) 多维度链上数据连接（TRON）
 - `get_network_status`
 - `get_usdt_balance`
 - `get_tx_status`
 - `get_account_profile`
 - `verify_unsigned_tx`
-- `create_unsigned_transfer` (execution demo flow)
+- `create_unsigned_transfer`（可作为执行链路示例）
 
-### 2) MCP Standard Packaging
-- Supports `tools/list` and `tools/call`
-- Exposed by HTTP bridge (`/tools`, `/call`, `/mcp`)
-- Can be recognized by MCP-capable clients
+### 2) MCP 标准封装
+- 支持 `tools/list` 与 `tools/call`
+- 提供 HTTP Bridge：`/tools`、`/call`、`/mcp`
+- 可被支持 MCP 的客户端识别与调用
 
-### 3) Safety & Readability
-- Address validation and Base58/Hex metadata output
-- Structured summaries for human-readable interpretation
+### 3) 安全与可读化
+- 地址校验与 Base58/Hex 元数据输出
+- 返回结构带摘要字段，便于人类与 AI Agent 理解
 
-## 🧠 RobinPump Copilot Extensions
+## 🧠 RobinPump Copilot 扩展工具
 ### `rp_quote`
-- Simulates buy/sell on virtual-reserve bonding curve
-- Outputs: `amountOut`, `avgPrice`, `spotPriceBefore/After`, `priceImpactPct`
+用于买入/卖出预演（基于虚拟储备常数乘积模型），输出：
+- `amountOut`
+- `avgPrice`
+- `spotPriceBefore` / `spotPriceAfter`
+- `priceImpactPct`
 
 ### `rp_split_plan`
-- Compares single-trade vs split-trade execution
-- Outputs tranche plan and comparison fields:
-  - `singleTradeImpactPct`
-  - `splitAvgImpactPct`
-  - `singleTotalOut`
-  - `splitTotalOut`
+用于拆单建议与对比分析，输出：
+- 分笔执行计划（plan）
+- `singleTradeImpactPct` 与 `splitAvgImpactPct` 对比
+- `singleTotalOut` 与 `splitTotalOut` 对比
 
-## 🖥️ Web Console Demo (3–5 min)
-1. Open the web console.
-2. Enter **RobinPump Copilot** section.
-3. Click `Preset A (Low Liquidity)`.
-4. Click `Run rp_quote`.
-5. Click `Run rp_split_plan`.
-6. Show that split average impact is lower than single-trade impact.
+## 🖥️ Web Console 演示（3–5 分钟）
+1. 打开 Web Console。
+2. 进入 **RobinPump Copilot** 区域。
+3. 点击 `Preset A (Low Liquidity)`。
+4. 点击 `Run rp_quote`。
+5. 点击 `Run rp_split_plan`。
+6. 展示 `single vs split` 对比，说明拆单收益。
 
-## ⚡ Judge Quickstart (No UI Required)
-Start server:
+## ⚡ Judge Quickstart（不打开 UI 也可验收）
+先启动服务端：
 
 ```powershell
 cd server
@@ -54,12 +59,12 @@ npm install
 npm run dev
 ```
 
-### 1) List tools
+### 1) 查看工具列表
 ```bash
 curl -s http://localhost:8787/tools | jq .
 ```
 
-### 2) Quote with preset A
+### 2) 运行 quote（Preset A）
 ```bash
 curl -X POST http://localhost:8787/call \
   -H "Content-Type: application/json" \
@@ -73,7 +78,7 @@ curl -X POST http://localhost:8787/call \
   }' | jq .
 ```
 
-### 3) Split plan with preset A
+### 3) 运行 split plan（Preset A）
 ```bash
 curl -X POST http://localhost:8787/call \
   -H "Content-Type: application/json" \
@@ -89,14 +94,14 @@ curl -X POST http://localhost:8787/call \
   }' | jq .
 ```
 
-Expected:
-- `/tools` contains `rp_quote` and `rp_split_plan`
+预期结果：
+- `/tools` 中能看到 `rp_quote` 和 `rp_split_plan`
 - `comparison.singleTradeImpactPct > comparison.splitAvgImpactPct`
-- `summary` clearly gives split-order recommendation
+- `summary` 中能明确体现拆单建议
 
-> If `jq` is not installed, remove `| jq .`.
+> 若本机未安装 `jq`，可去掉 `| jq .`，直接查看原始 JSON。
 
-## 📦 Local Run
+## 📦 本地运行
 ### Server
 ```powershell
 cd server
@@ -111,30 +116,30 @@ npm install
 npm run dev
 ```
 
-Open: `http://localhost:5173`
+打开：`http://localhost:5173`
 
-## ☁️ Deployment
-### Backend (Railway)
-Required env:
+## ☁️ 部署说明
+### Backend（Railway）
+必需环境变量：
 - `TRONGRID_BASE`
 - `TRONSCAN_BASE`
 - `CORS_ORIGIN`
 
-### Frontend (Vercel)
-Required env:
+### Frontend（Vercel）
+必需环境变量：
 - `VITE_API_BASE_URL=https://<your-railway-domain>`
 
-## 🗂️ Submission Checklist
+## 🗂️ 提交材料清单（占位）
 - Canva Slides: TODO
 - Demo Video: TODO
 - Screenshots: TODO
 - Loom Walkthrough: TODO
 
-Materials placeholder paths:
+材料目录：
 - `demo/prompts.md`
 - `demo/screenshots/`
 
-## 📁 Project Structure
+## 📁 项目结构
 ```text
 .
 ├─ README.md
